@@ -18,3 +18,14 @@ animation/
 # Internal planning documents
 reports/
 RAILROAD_ARCHITECTURE.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# SQLite test databases (created by broker during testing)
+.planning/codex_review_broker.sqlite3
+.planning/codex_review_broker.sqlite3-wal
+.planning/codex_review_broker.sqlite3-shm
