@@ -175,3 +175,38 @@ async def close_review(
         await app.db.execute("ROLLBACK")
         raise
     return {"review_id": review_id, "status": ReviewStatus.CLOSED}
+
+
+@mcp.tool
+async def get_review_status(
+    review_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Check the current status of a review. Call repeatedly to poll for changes.
+
+    Returns immediately -- does NOT block waiting for reviewer action.
+    Recommended polling interval: 3 seconds.
+    """
+    app: AppContext = ctx.lifespan_context
+    cursor = await app.db.execute(
+        """SELECT id, status, intent, agent_type, agent_role, phase, plan, task,
+                  claimed_by, verdict_reason, updated_at
+           FROM reviews WHERE id = ?""",
+        (review_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return {"error": f"Review {review_id} not found"}
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "intent": row["intent"],
+        "agent_type": row["agent_type"],
+        "agent_role": row["agent_role"],
+        "phase": row["phase"],
+        "plan": row["plan"],
+        "task": row["task"],
+        "claimed_by": row["claimed_by"],
+        "verdict_reason": row["verdict_reason"],
+        "updated_at": row["updated_at"],
+    }

@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import aiosqlite
-import pytest
-
-from gsd_review_broker.db import AppContext
 from gsd_review_broker.tools import (
     claim_review,
     close_review,
@@ -16,18 +12,8 @@ from gsd_review_broker.tools import (
     submit_verdict,
 )
 
-
-@dataclass
-class MockContext:
-    """Minimal mock for fastmcp.Context that provides lifespan_context."""
-
-    lifespan_context: AppContext
-
-
-@pytest.fixture
-def ctx(db: aiosqlite.Connection) -> MockContext:
-    """Create a MockContext wrapping the in-memory db fixture."""
-    return MockContext(lifespan_context=AppContext(db=db))
+if TYPE_CHECKING:
+    from conftest import MockContext
 
 
 # ---- Helpers ----
