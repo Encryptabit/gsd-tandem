@@ -14,7 +14,7 @@
 
 ### Review Protocol
 
-- [ ] **PROTO-01**: Reviews follow a state machine: pending → claimed → in_review → approved/changes_requested → closed, with valid transition enforcement
+- [ ] **PROTO-01**: Reviews follow a state machine: pending -> claimed -> in_review -> approved/changes_requested -> closed, with valid transition enforcement
 - [ ] **PROTO-02**: Proposer can create a proposal containing intent description (natural language) and unified diff (machine-parseable), validated on submission
 - [ ] **PROTO-03**: Reviewer can submit a verdict: approve, request_changes, or comment, each with optional notes
 - [ ] **PROTO-04**: Proposer creates a review and reviewer claims it, with one reviewer per review
@@ -27,7 +27,7 @@
 
 - [ ] **INTER-01**: Every message and proposal includes full agent identity: agent_type, agent_role, phase, plan, task number
 - [ ] **INTER-02**: Proposer blocks (poll-and-return with configurable interval) until reviewer responds, respecting MCP tool timeout constraints
-- [ ] **INTER-03**: Messages form a threaded conversation per review, supporting multi-round back-and-forth (propose → request changes → revise → re-review)
+- [ ] **INTER-03**: Messages form a threaded conversation per review, supporting multi-round back-and-forth (propose -> request changes -> revise -> re-review)
 - [ ] **INTER-04**: Review granularity is configurable: per-task (default) or per-plan, settable in .planning/config.json
 - [ ] **INTER-05**: Optimistic execution mode available: proposer applies changes provisionally, rolls back on rejection (opt-in per config)
 - [ ] **INTER-06**: Push notification mechanism available when reviewer is connected, falling back to polling when not
@@ -67,7 +67,7 @@
 | Authentication / authorization | Localhost trusted environment; zero value on 127.0.0.1 |
 | File-level access control (CODEOWNERS) | Over-engineering for 1:1 review broker with single reviewer |
 | Automatic merge/commit on approval | Violates "Claude remains sole writer/committer" constraint |
-| Real-time collaborative editing | Requires WebSocket sync, OT/CRDT — fundamentally different architecture |
+| Real-time collaborative editing | Requires WebSocket sync, OT/CRDT -- fundamentally different architecture |
 | Natural language diff generation | Unreliable; proposer has git diff access for machine-generated diffs |
 | Review bot / linting integration | Broker is communication channel, not CI system; security risk |
 | Remote/cloud deployment | Local-only by design; no SaaS dependency |
@@ -77,37 +77,37 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FOUND-01 | - | Pending |
-| FOUND-02 | - | Pending |
-| FOUND-03 | - | Pending |
-| FOUND-04 | - | Pending |
-| PROTO-01 | - | Pending |
-| PROTO-02 | - | Pending |
-| PROTO-03 | - | Pending |
-| PROTO-04 | - | Pending |
-| PROTO-05 | - | Pending |
-| PROTO-06 | - | Pending |
-| PROTO-07 | - | Pending |
-| PROTO-08 | - | Pending |
-| INTER-01 | - | Pending |
-| INTER-02 | - | Pending |
-| INTER-03 | - | Pending |
-| INTER-04 | - | Pending |
-| INTER-05 | - | Pending |
-| INTER-06 | - | Pending |
-| GSDI-01 | - | Pending |
-| GSDI-02 | - | Pending |
-| GSDI-03 | - | Pending |
-| GSDI-04 | - | Pending |
-| GSDI-05 | - | Pending |
-| GSDI-06 | - | Pending |
-| OBSV-01 | - | Pending |
+| FOUND-01 | Phase 1 | Pending |
+| FOUND-02 | Phase 1 | Pending |
+| FOUND-03 | Phase 2 | Pending |
+| FOUND-04 | Phase 1 | Pending |
+| PROTO-01 | Phase 1 | Pending |
+| PROTO-02 | Phase 2 | Pending |
+| PROTO-03 | Phase 2 | Pending |
+| PROTO-04 | Phase 1 | Pending |
+| PROTO-05 | Phase 2 | Pending |
+| PROTO-06 | Phase 3 | Pending |
+| PROTO-07 | Phase 2 | Pending |
+| PROTO-08 | Phase 3 | Pending |
+| INTER-01 | Phase 1 | Pending |
+| INTER-02 | Phase 1 | Pending |
+| INTER-03 | Phase 3 | Pending |
+| INTER-04 | Phase 4 | Pending |
+| INTER-05 | Phase 4 | Pending |
+| INTER-06 | Phase 3 | Pending |
+| GSDI-01 | Phase 4 | Pending |
+| GSDI-02 | Phase 4 | Pending |
+| GSDI-03 | Phase 4 | Pending |
+| GSDI-04 | Phase 4 | Pending |
+| GSDI-05 | Phase 4 | Pending |
+| GSDI-06 | Phase 5 | Pending |
+| OBSV-01 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25
+- Mapped to phases: 25
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-16 after initial definition*
+*Last updated: 2026-02-16 after roadmap creation*
