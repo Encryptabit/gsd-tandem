@@ -30,12 +30,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Reviewer can list pending reviews and claim one, transitioning it through the state machine (pending -> claimed -> approved/rejected -> closed)
   4. Proposer can poll for review status without exceeding MCP tool timeout (returns within 30 seconds per call)
   5. All review data persists in SQLite at .planning/codex_review_broker.sqlite3 and survives server restart
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Project scaffolding, FastMCP server with lifespan-managed SQLite connection
-- [ ] 01-02: Review state machine, data models, and core lifecycle tools
-- [ ] 01-03: Poll-and-return wait strategy, agent identity, cross-platform validation
+- [ ] 01-01-PLAN.md -- Project scaffolding, FastMCP server with lifespan-managed SQLite connection
+- [ ] 01-02-PLAN.md -- Review state machine, data models, and core lifecycle tools with tests
+- [ ] 01-03-PLAN.md -- Poll-and-return tool, .mcp.json config, live MCP connectivity verification
 
 ### Phase 2: Proposal and Diff Protocol
 **Goal**: Proposer can submit proposals containing intent descriptions and unified diffs, reviewer can evaluate them, and invalid diffs are caught before review begins
@@ -106,7 +106,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Broker Server | 0/3 | Not started | - |
+| 1. Core Broker Server | 0/3 | Planned | - |
 | 2. Proposal and Diff Protocol | 0/2 | Not started | - |
 | 3. Discussion and Patches | 0/2 | Not started | - |
 | 4. GSD Workflow Integration | 0/3 | Not started | - |
