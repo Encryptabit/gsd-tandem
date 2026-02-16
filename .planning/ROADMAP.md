@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md -- Project scaffolding, FastMCP server with lifespan-managed SQLite connection
-- [ ] 01-02-PLAN.md -- Review state machine, data models, and core lifecycle tools with tests
+- [x] 01-02-PLAN.md -- Review state machine, data models, and core lifecycle tools with tests
 - [ ] 01-03-PLAN.md -- Poll-and-return tool, .mcp.json config, live MCP connectivity verification
 
 ### Phase 2: Proposal and Diff Protocol
@@ -106,7 +106,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Broker Server | 1/3 | In progress | - |
+| 1. Core Broker Server | 2/3 | In progress | - |
 | 2. Proposal and Diff Protocol | 0/2 | Not started | - |
 | 3. Discussion and Patches | 0/2 | Not started | - |
 | 4. GSD Workflow Integration | 0/3 | Not started | - |
