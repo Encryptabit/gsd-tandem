@@ -4,6 +4,9 @@
   "parallelization": true,
   "commit_docs": true,
   "model_profile": "quality",
+  "tandem_enabled": false,
+  "review_granularity": "per_task",
+  "execution_mode": "blocking",
   "workflow": {
     "research": true,
     "plan_check": true,
