@@ -13,7 +13,7 @@ GSD Tandem delivers a local MCP review broker that intercepts every meaningful c
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
-- [ ] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
+- [x] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
 - [ ] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
 - [ ] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
 - [ ] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
@@ -50,8 +50,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Schema evolution, diff utilities, model updates, repo root discovery, and diff_utils tests
-- [ ] 02-02-PLAN.md -- Extend tool handlers (create_review, claim_review, submit_verdict), add get_proposal, proposal lifecycle tests
+- [x] 02-01-PLAN.md -- Schema evolution, diff utilities, model updates, repo root discovery, and diff_utils tests
+- [x] 02-02-PLAN.md -- Extend tool handlers (create_review, claim_review, submit_verdict), add get_proposal, proposal lifecycle tests
 
 ### Phase 3: Discussion and Patches
 **Goal**: Proposer and reviewer can have multi-round conversations within a review, with the reviewer able to supply alternative patches and prioritize reviews
@@ -107,7 +107,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
-| 2. Proposal and Diff Protocol | 0/2 | Not started | - |
+| 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
 | 3. Discussion and Patches | 0/2 | Not started | - |
 | 4. GSD Workflow Integration | 0/3 | Not started | - |
 | 5. Observability and Validation | 0/2 | Not started | - |

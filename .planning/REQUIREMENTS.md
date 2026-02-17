@@ -9,18 +9,18 @@
 
 - [x] **FOUND-01**: Broker persists all review data in SQLite at .planning/codex_review_broker.sqlite3 with WAL mode and BEGIN IMMEDIATE transactions
 - [x] **FOUND-02**: Broker runs as FastMCP Streamable HTTP server bound to 127.0.0.1 only, supporting concurrent connections from proposer and reviewer
-- [ ] **FOUND-03**: Broker exposes MCP tools for full review lifecycle (create, claim, message, verdict, status, close)
+- [x] **FOUND-03**: Broker exposes MCP tools for full review lifecycle (create, claim, message, verdict, status, close)
 - [x] **FOUND-04**: Broker works on Windows (PowerShell) and macOS/Linux (bash) without platform-specific workarounds
 
 ### Review Protocol
 
 - [x] **PROTO-01**: Reviews follow a state machine: pending -> claimed -> in_review -> approved/changes_requested -> closed, with valid transition enforcement
-- [ ] **PROTO-02**: Proposer can create a proposal containing intent description (natural language) and unified diff (machine-parseable), validated on submission
-- [ ] **PROTO-03**: Reviewer can submit a verdict: approve, request_changes, or comment, each with optional notes
+- [x] **PROTO-02**: Proposer can create a proposal containing intent description (natural language) and unified diff (machine-parseable), validated on submission
+- [x] **PROTO-03**: Reviewer can submit a verdict: approve, request_changes, or comment, each with optional notes
 - [x] **PROTO-04**: Proposer creates a review and reviewer claims it, with one reviewer per review
-- [ ] **PROTO-05**: Diffs are transported in standard unified format, stored as text in SQLite, supporting multi-file diffs
+- [x] **PROTO-05**: Diffs are transported in standard unified format, stored as text in SQLite, supporting multi-file diffs
 - [ ] **PROTO-06**: Reviewer can submit counter-patches (alternative unified diffs) attached to request_changes or comment verdicts
-- [ ] **PROTO-07**: Broker runs `git apply --check` on proposal submission to detect conflicts before review begins
+- [x] **PROTO-07**: Broker runs `git apply --check` on proposal submission to detect conflicts before review begins
 - [ ] **PROTO-08**: Reviews support priority levels (critical, normal, low) affecting reviewer queue ordering
 
 ### Agent Interaction
@@ -79,15 +79,15 @@
 |-------------|-------|--------|
 | FOUND-01 | Phase 1 | Complete |
 | FOUND-02 | Phase 1 | Complete |
-| FOUND-03 | Phase 2 | Pending |
+| FOUND-03 | Phase 2 | Complete |
 | FOUND-04 | Phase 1 | Complete |
 | PROTO-01 | Phase 1 | Complete |
-| PROTO-02 | Phase 2 | Pending |
-| PROTO-03 | Phase 2 | Pending |
+| PROTO-02 | Phase 2 | Complete |
+| PROTO-03 | Phase 2 | Complete |
 | PROTO-04 | Phase 1 | Complete |
-| PROTO-05 | Phase 2 | Pending |
+| PROTO-05 | Phase 2 | Complete |
 | PROTO-06 | Phase 3 | Pending |
-| PROTO-07 | Phase 2 | Pending |
+| PROTO-07 | Phase 2 | Complete |
 | PROTO-08 | Phase 3 | Pending |
 | INTER-01 | Phase 1 | Complete |
 | INTER-02 | Phase 1 | Complete |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-16 after Phase 1 completion*
+*Last updated: 2026-02-17 after Phase 2 completion*
