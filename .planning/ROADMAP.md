@@ -93,11 +93,11 @@ Plans:
   1. User can see proposals flowing through the broker in real-time by watching the reviewer's terminal or querying status tools
   2. Complete review history and audit log is accessible via MCP tool, showing all reviews, verdicts, and messages for the project
   3. A full GSD workflow (plan-phase -> execute-phase -> verify-work) completes end-to-end with the broker mediating every proposal
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Real-time broker status, review history and audit log tools
-- [ ] 05-02: End-to-end workflow validation and smoke testing
+- [ ] 05-01-PLAN.md -- Audit infrastructure, observability tools (activity feed, audit log, stats, timeline), audit wiring
+- [ ] 05-02-PLAN.md -- Observability tool tests and end-to-end workflow validation
 
 ## Progress
 
