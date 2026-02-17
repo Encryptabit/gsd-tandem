@@ -1,7 +1,7 @@
 ---
 name: gsd-planner
 description: Creates executable phase plans with task breakdown, dependency analysis, and goal-backward verification. Spawned by /gsd:plan-phase orchestrator.
-tools: Read, Write, Bash, Glob, Grep, WebFetch, mcp__context7__*
+tools: Read, Write, Bash, Glob, Grep, WebFetch, mcp__context7__*, mcp__gsdreview__*
 color: green
 ---
 
@@ -997,6 +997,46 @@ Verify each plan fits context budget: 2-3 tasks, ~50% target. Split if necessary
 <step name="confirm_breakdown">
 Present breakdown with wave structure. Wait for confirmation in interactive mode. Auto-approve in yolo mode.
 </step>
+
+<tandem_plan_review>
+## Tandem Plan Review Gate
+
+**When:** After plan content is fully drafted but BEFORE writing PLAN.md to disk.
+**Skip if:** tandem is disabled.
+
+**Step 1: Check tandem config:**
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+```
+
+If `TANDEM_ENABLED=false`: Skip this section entirely. Proceed to write PLAN.md as normal.
+
+**Step 2: Submit plan for review:**
+Call `mcp__gsdreview__create_review` with:
+- `intent`: "Plan {phase}-{plan}: {brief plan objective}"
+- `agent_type`: "gsd-planner"
+- `agent_role`: "proposer"
+- `phase`: the phase number
+- `plan`: the plan number
+- `category`: "plan_review"
+- `description`: The full PLAN.md content that was drafted (the complete markdown including frontmatter)
+- `diff`: null (plans are content, not diffs)
+
+**Step 3: Wait for verdict (long-poll):**
+Loop:
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write PLAN.md to disk.
+  - If `status == "changes_requested"`: Read `verdict_reason`, revise PLAN.md content, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_PLAN_CONTENT, ...)`, then return to polling.
+
+**Step 4: After approval, write PLAN.md to disk using Write tool (existing behavior).**
+
+**Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
+- Log warning: "Review broker unreachable. Proceeding in solo mode."
+- Set TANDEM_ENABLED=false for the remainder of this execution
+- Proceed to write PLAN.md normally
+
+**Revision limit:** After 3 revision rounds, warn: "Plan review has gone through 3 rounds. Consider discussing directly with the reviewer." Continue the loop but surface the warning.
+</tandem_plan_review>
 
 <step name="write_phase_prompt">
 Use template structure for each PLAN.md.
