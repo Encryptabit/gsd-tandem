@@ -532,7 +532,7 @@ async def add_message(
             # Turn enforcement: check last message sender
             cursor = await app.db.execute(
                 "SELECT sender_role FROM messages WHERE review_id = ? "
-                "ORDER BY created_at DESC LIMIT 1",
+                "ORDER BY rowid DESC LIMIT 1",
                 (review_id,),
             )
             last_msg = await cursor.fetchone()
