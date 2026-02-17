@@ -1027,15 +1027,15 @@ async def get_review_stats(ctx: Context = None) -> dict:
     """
     app: AppContext = ctx.lifespan_context
 
-    # Query 1: Status counts
+    # Query 1: Status counts (COALESCE ensures 0 instead of NULL on empty table)
     cursor = await app.db.execute("""
         SELECT
             COUNT(*) AS total,
-            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-            SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed,
-            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
-            SUM(CASE WHEN status = 'changes_requested' THEN 1 ELSE 0 END) AS changes_requested,
-            SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed
+            COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+            COALESCE(SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END), 0) AS claimed,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) AS approved,
+            COALESCE(SUM(CASE WHEN status = 'changes_requested' THEN 1 ELSE 0 END), 0) AS changes_requested,
+            COALESCE(SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END), 0) AS closed
         FROM reviews
     """)
     counts = dict(await cursor.fetchone())
