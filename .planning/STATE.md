@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 2 complete, ready for Phase 3
+**Current focus:** Phase 3 in progress -- discussion and patches
 
 ## Current Position
 
-Phase: 2 of 5 (Proposal and Diff Protocol)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-02-17 -- Completed 02-02-PLAN.md (tool handlers and get_proposal)
+Phase: 3 of 5 (Discussion and Patches)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-17 -- Completed 03-01-PLAN.md (discussion foundation and message threading)
 
-Progress: [#####░░░░░] 42% (5/12 plans)
+Progress: [######░░░░] 50% (6/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: ~6.2 minutes
-- Total execution time: ~32 minutes
+- Total plans completed: 6
+- Average duration: ~6.5 minutes
+- Total execution time: ~40 minutes
 
 **By Phase:**
 
@@ -29,9 +29,10 @@ Progress: [#####░░░░░] 42% (5/12 plans)
 |-------|-------|-------|----------|
 | 1. Core Broker Server | 3/3 | ~21 min | ~7 min |
 | 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
+| 3. Discussion and Patches | 1/2 | ~8 min | ~8 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (~4 min), 01-03 (~12 min incl. checkpoint), 02-01 (~5 min), 02-02 (~6 min)
+- Last 5 plans: 01-03 (~12 min incl. checkpoint), 02-01 (~5 min), 02-02 (~6 min), 03-01 (~8 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -63,6 +64,10 @@ Recent decisions affecting current work:
 - [02-02]: claim_review omits full diff from response; use get_proposal for full diff
 - [02-02]: Comment verdict has no state transition -- updates verdict_reason only
 - [02-02]: Notes enforcement: non-whitespace notes required for changes_requested/comment, optional for approved
+- [03-01]: Turn enforcement uses rowid ordering (not created_at) for deterministic behavior under fast inserts
+- [03-01]: Turn alternation is global across rounds (not reset per round) -- flat chronological conversation
+- [03-01]: Priority fixed at review creation time, not modified on revision
+- [03-01]: Notifications fire outside write_lock (after COMMIT) to avoid holding lock during event signaling
 
 ### Pending Todos
 
@@ -75,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T02:55:00Z
-Stopped at: Completed 02-02-PLAN.md -- Phase 2 complete
+Last session: 2026-02-17T07:30:00Z
+Stopped at: Completed 03-01-PLAN.md -- Phase 3 plan 1 complete
 Resume file: None
