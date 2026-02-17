@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
 - [x] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
 - [x] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
-- [ ] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
+- [x] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
 - [ ] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
 
 ## Phase Details
@@ -81,9 +81,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- Category field support in broker, tandem config in config.json, category tests
-- [ ] 04-02-PLAN.md -- MCP tool permissions in commands, tandem review gates in planner/discuss/verify
-- [ ] 04-03-PLAN.md -- Executor tandem integration: blocking, optimistic, per-plan modes
+- [x] 04-01-PLAN.md -- Category field support in broker, tandem config in config.json, category tests
+- [x] 04-02-PLAN.md -- MCP tool permissions in commands, tandem review gates in planner/discuss/verify
+- [x] 04-03-PLAN.md -- Executor tandem integration: blocking, optimistic, per-plan modes
 
 ### Phase 5: Observability and Validation
 **Goal**: Users can monitor broker activity in real-time and query complete review history for any project
@@ -109,5 +109,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
 | 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
 | 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
-| 4. GSD Workflow Integration | 1/3 | In progress | - |
+| 4. GSD Workflow Integration | 3/3 | Complete | 2026-02-17 |
 | 5. Observability and Validation | 0/2 | Not started | - |

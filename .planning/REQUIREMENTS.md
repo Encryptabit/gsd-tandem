@@ -28,17 +28,17 @@
 - [x] **INTER-01**: Every message and proposal includes full agent identity: agent_type, agent_role, phase, plan, task number
 - [x] **INTER-02**: Proposer blocks (poll-and-return with configurable interval) until reviewer responds, respecting MCP tool timeout constraints
 - [x] **INTER-03**: Messages form a threaded conversation per review, supporting multi-round back-and-forth (propose -> request changes -> revise -> re-review)
-- [ ] **INTER-04**: Review granularity is configurable: per-task (default) or per-plan, settable in .planning/config.json
-- [ ] **INTER-05**: Optimistic execution mode available: proposer applies changes provisionally, rolls back on rejection (opt-in per config)
+- [x] **INTER-04**: Review granularity is configurable: per-task (default) or per-plan, settable in .planning/config.json
+- [x] **INTER-05**: Optimistic execution mode available: proposer applies changes provisionally, rolls back on rejection (opt-in per config)
 - [x] **INTER-06**: Push notification mechanism available when reviewer is connected, falling back to polling when not
 
 ### GSD Integration
 
-- [ ] **GSDI-01**: plan-phase, execute-phase, discuss-phase, and verify-work commands include mcp__gsdreview__* in allowed-tools
-- [ ] **GSDI-02**: Checkpoint mechanism in plan-phase pauses after drafting plan outlines to submit proposal and await approval before writing PLAN.md
-- [ ] **GSDI-03**: Checkpoint mechanism in execute-phase pauses before each task commit (or per-plan, per config) to submit proposal and await approval
-- [ ] **GSDI-04**: Sub-agents (gsd-executor, gsd-planner) can submit proposals directly to the broker with their own agent identity
-- [ ] **GSDI-05**: discuss-phase and verify-work can send handoff messages through the broker for reviewer awareness
+- [x] **GSDI-01**: plan-phase, execute-phase, discuss-phase, and verify-work commands include mcp__gsdreview__* in allowed-tools
+- [x] **GSDI-02**: Checkpoint mechanism in plan-phase pauses after drafting plan outlines to submit proposal and await approval before writing PLAN.md
+- [x] **GSDI-03**: Checkpoint mechanism in execute-phase pauses before each task commit (or per-plan, per config) to submit proposal and await approval
+- [x] **GSDI-04**: Sub-agents (gsd-executor, gsd-planner) can submit proposals directly to the broker with their own agent identity
+- [x] **GSDI-05**: discuss-phase and verify-work can send handoff messages through the broker for reviewer awareness
 - [ ] **GSDI-06**: Review history and audit log accessible via MCP tool, showing all reviews, verdicts, and messages for the project
 
 ### Observability
@@ -92,14 +92,14 @@
 | INTER-01 | Phase 1 | Complete |
 | INTER-02 | Phase 1 | Complete |
 | INTER-03 | Phase 3 | Complete |
-| INTER-04 | Phase 4 | Pending |
-| INTER-05 | Phase 4 | Pending |
+| INTER-04 | Phase 4 | Complete |
+| INTER-05 | Phase 4 | Complete |
 | INTER-06 | Phase 3 | Complete |
-| GSDI-01 | Phase 4 | Pending |
-| GSDI-02 | Phase 4 | Pending |
-| GSDI-03 | Phase 4 | Pending |
-| GSDI-04 | Phase 4 | Pending |
-| GSDI-05 | Phase 4 | Pending |
+| GSDI-01 | Phase 4 | Complete |
+| GSDI-02 | Phase 4 | Complete |
+| GSDI-03 | Phase 4 | Complete |
+| GSDI-04 | Phase 4 | Complete |
+| GSDI-05 | Phase 4 | Complete |
 | GSDI-06 | Phase 5 | Pending |
 | OBSV-01 | Phase 5 | Pending |
 
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-17 after Phase 3 completion*
+*Last updated: 2026-02-17 after Phase 4 completion*
