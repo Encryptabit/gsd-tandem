@@ -234,7 +234,10 @@ class TestCloseReview:
             review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
         )
         await submit_verdict.fn(
-            review_id=created["review_id"], verdict="changes_requested", ctx=ctx
+            review_id=created["review_id"],
+            verdict="changes_requested",
+            reason="Needs refactor",
+            ctx=ctx,
         )
         result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
         assert result["status"] == "closed"

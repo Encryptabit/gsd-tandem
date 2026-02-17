@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import suppress
 
 from fastmcp import Context
 
 from gsd_review_broker.db import AppContext
+from gsd_review_broker.diff_utils import extract_affected_files, validate_diff
 from gsd_review_broker.models import ReviewStatus
 from gsd_review_broker.server import mcp
 from gsd_review_broker.state_machine import validate_transition
@@ -30,22 +32,83 @@ async def create_review(
     phase: str,
     plan: str | None = None,
     task: str | None = None,
+    description: str | None = None,
+    diff: str | None = None,
+    review_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a new review for a proposed change. Returns review_id and initial status."""
+    """Create a new review or revise an existing one.
+
+    **New review** (omit review_id): Creates a fresh review with the given intent,
+    description, and optional unified diff. Returns review_id and initial status.
+
+    **Revision** (pass existing review_id): Resubmits a review that is in
+    changes_requested state. Replaces intent, description, diff, and affected_files.
+    Clears claimed_by and verdict_reason. Returns to pending status.
+    """
     app: AppContext = ctx.lifespan_context
-    review_id = str(uuid.uuid4())
+
+    # Compute affected_files from diff if provided
+    affected_files: str | None = None
+    if diff is not None:
+        affected_files = extract_affected_files(diff)
+
+    # --- Revision flow ---
+    if review_id is not None:
+        async with app.write_lock:
+            try:
+                await app.db.execute("BEGIN IMMEDIATE")
+                cursor = await app.db.execute(
+                    "SELECT status FROM reviews WHERE id = ?", (review_id,)
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await app.db.execute("ROLLBACK")
+                    return {"error": f"Review not found: {review_id}"}
+                current_status = ReviewStatus(row["status"])
+                try:
+                    validate_transition(current_status, ReviewStatus.PENDING)
+                except ValueError as exc:
+                    await app.db.execute("ROLLBACK")
+                    return {"error": str(exc)}
+                await app.db.execute(
+                    """UPDATE reviews
+                       SET status = ?, intent = ?, description = ?, diff = ?,
+                           affected_files = ?, claimed_by = NULL, verdict_reason = NULL,
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (
+                        ReviewStatus.PENDING,
+                        intent,
+                        description,
+                        diff,
+                        affected_files,
+                        review_id,
+                    ),
+                )
+                await app.db.execute("COMMIT")
+            except Exception as exc:
+                await _rollback_quietly(app)
+                return _db_error("create_review", exc)
+        return {"review_id": review_id, "status": ReviewStatus.PENDING, "revised": True}
+
+    # --- New review flow ---
+    new_review_id = str(uuid.uuid4())
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
             await app.db.execute(
-                """INSERT INTO reviews (id, status, intent, agent_type, agent_role,
+                """INSERT INTO reviews (id, status, intent, description, diff,
+                                        affected_files, agent_type, agent_role,
                                         phase, plan, task, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
                 (
-                    review_id,
+                    new_review_id,
                     ReviewStatus.PENDING,
                     intent,
+                    description,
+                    diff,
+                    affected_files,
                     agent_type,
                     agent_role,
                     phase,
@@ -57,7 +120,7 @@ async def create_review(
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("create_review", exc)
-    return {"review_id": review_id, "status": ReviewStatus.PENDING}
+    return {"review_id": new_review_id, "status": ReviewStatus.PENDING}
 
 
 @mcp.tool
@@ -101,12 +164,24 @@ async def claim_review(
     reviewer_id: str,
     ctx: Context = None,
 ) -> dict:
-    """Claim a pending review for evaluation. Only pending reviews can be claimed."""
+    """Claim a pending review for evaluation. Only pending reviews can be claimed.
+
+    If the review contains a unified diff, it is validated against the working tree
+    using git apply --check inside the write lock. If the diff does not apply cleanly,
+    the review is auto-rejected with changes_requested status and validation error details.
+
+    On successful claim, returns review metadata (intent, description, affected_files,
+    has_diff flag) but NOT the full diff text. Use get_proposal to retrieve the diff.
+    """
     app: AppContext = ctx.lifespan_context
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
-            cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
+            cursor = await app.db.execute(
+                "SELECT status, diff, intent, description, affected_files "
+                "FROM reviews WHERE id = ?",
+                (review_id,),
+            )
             row = await cursor.fetchone()
             if row is None:
                 await app.db.execute("ROLLBACK")
@@ -117,6 +192,32 @@ async def claim_review(
             except ValueError as exc:
                 await app.db.execute("ROLLBACK")
                 return {"error": str(exc)}
+
+            # Validate diff inside write_lock (prevents wasted subprocess on concurrent claims)
+            diff_text = row["diff"]
+            if diff_text:
+                is_valid, error_detail = await validate_diff(diff_text, cwd=app.repo_root)
+                if not is_valid:
+                    await app.db.execute(
+                        """UPDATE reviews
+                           SET status = ?, verdict_reason = ?, claimed_by = ?,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (
+                            ReviewStatus.CHANGES_REQUESTED,
+                            f"Auto-rejected: diff does not apply cleanly.\n{error_detail}",
+                            "broker-validator",
+                            review_id,
+                        ),
+                    )
+                    await app.db.execute("COMMIT")
+                    return {
+                        "review_id": review_id,
+                        "status": "changes_requested",
+                        "auto_rejected": True,
+                        "validation_error": error_detail,
+                    }
+
             await app.db.execute(
                 """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
                    WHERE id = ?""",
@@ -126,7 +227,24 @@ async def claim_review(
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("claim_review", exc)
-    return {"review_id": review_id, "status": ReviewStatus.CLAIMED, "claimed_by": reviewer_id}
+
+    # Build response with inline proposal metadata
+    result: dict = {
+        "review_id": review_id,
+        "status": ReviewStatus.CLAIMED,
+        "claimed_by": reviewer_id,
+        "intent": row["intent"],
+    }
+    if row["description"] is not None:
+        result["description"] = row["description"]
+    if row["affected_files"] is not None:
+        try:
+            result["affected_files"] = json.loads(row["affected_files"])
+        except (json.JSONDecodeError, TypeError):
+            result["affected_files"] = row["affected_files"]
+    if diff_text:
+        result["has_diff"] = True
+    return result
 
 
 @mcp.tool
@@ -136,17 +254,71 @@ async def submit_verdict(
     reason: str | None = None,
     ctx: Context = None,
 ) -> dict:
-    """Submit a verdict on a claimed review. Verdict must be 'approved' or 'changes_requested'."""
+    """Submit a verdict on a claimed review.
+
+    Verdict must be 'approved', 'changes_requested', or 'comment'.
+    - approved: Approves the review (notes optional).
+    - changes_requested: Requests changes (notes required).
+    - comment: Records feedback without changing review state (notes required).
+    """
+    # --- Notes enforcement ---
+    if verdict == "changes_requested" and not reason:
+        return {"error": "Notes (reason) required for 'changes_requested' verdict."}
+    if verdict == "comment" and not reason:
+        return {"error": "Notes (reason) required for 'comment' verdict."}
+
+    # --- Comment verdict (no state transition) ---
+    if verdict == "comment":
+        app: AppContext = ctx.lifespan_context
+        async with app.write_lock:
+            try:
+                await app.db.execute("BEGIN IMMEDIATE")
+                cursor = await app.db.execute(
+                    "SELECT status FROM reviews WHERE id = ?", (review_id,)
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await app.db.execute("ROLLBACK")
+                    return {"error": f"Review not found: {review_id}"}
+                current_status = ReviewStatus(row["status"])
+                if current_status not in (ReviewStatus.CLAIMED, ReviewStatus.IN_REVIEW):
+                    await app.db.execute("ROLLBACK")
+                    return {
+                        "error": (
+                            f"Cannot comment on review in '{current_status}' state. "
+                            "Comments are only valid on claimed or in_review reviews."
+                        )
+                    }
+                await app.db.execute(
+                    """UPDATE reviews SET verdict_reason = ?, updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (reason, review_id),
+                )
+                await app.db.execute("COMMIT")
+            except Exception as exc:
+                await _rollback_quietly(app)
+                return _db_error("submit_verdict", exc)
+        return {
+            "review_id": review_id,
+            "status": str(current_status),
+            "verdict": "comment",
+            "verdict_reason": reason,
+        }
+
+    # --- Standard verdicts (approved / changes_requested) ---
     valid_verdicts = {
         "approved": ReviewStatus.APPROVED,
         "changes_requested": ReviewStatus.CHANGES_REQUESTED,
     }
     if verdict not in valid_verdicts:
         return {
-            "error": f"Invalid verdict: {verdict!r}. Must be 'approved' or 'changes_requested'."
+            "error": (
+                f"Invalid verdict: {verdict!r}. "
+                "Must be 'approved', 'changes_requested', or 'comment'."
+            )
         }
     target_status = valid_verdicts[verdict]
-    app: AppContext = ctx.lifespan_context
+    app = ctx.lifespan_context
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -238,4 +410,41 @@ async def get_review_status(
         "claimed_by": row["claimed_by"],
         "verdict_reason": row["verdict_reason"],
         "updated_at": row["updated_at"],
+    }
+
+
+@mcp.tool
+async def get_proposal(
+    review_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Retrieve full proposal content including diff.
+
+    Use after claim_review to read the complete unified diff for review.
+    This is a read-only operation -- no state changes occur.
+    """
+    app: AppContext = ctx.lifespan_context
+    cursor = await app.db.execute(
+        """SELECT id, status, intent, description, diff, affected_files
+           FROM reviews WHERE id = ?""",
+        (review_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return {"error": f"Review {review_id} not found"}
+
+    affected_files = None
+    if row["affected_files"] is not None:
+        try:
+            affected_files = json.loads(row["affected_files"])
+        except (json.JSONDecodeError, TypeError):
+            affected_files = row["affected_files"]
+
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "intent": row["intent"],
+        "description": row["description"],
+        "diff": row["diff"],
+        "affected_files": affected_files,
     }
