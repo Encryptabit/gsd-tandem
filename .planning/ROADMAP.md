@@ -12,7 +12,7 @@ GSD Tandem delivers a local MCP review broker that intercepts every meaningful c
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
+- [x] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
 - [ ] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
 - [ ] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
 - [ ] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md -- Project scaffolding, FastMCP server with lifespan-managed SQLite connection
 - [x] 01-02-PLAN.md -- Review state machine, data models, and core lifecycle tools with tests
-- [ ] 01-03-PLAN.md -- Poll-and-return tool, .mcp.json config, live MCP connectivity verification
+- [x] 01-03-PLAN.md -- Poll-and-return tool, .mcp.json config, live MCP connectivity verification
 
 ### Phase 2: Proposal and Diff Protocol
 **Goal**: Proposer can submit proposals containing intent descriptions and unified diffs, reviewer can evaluate them, and invalid diffs are caught before review begins
@@ -106,7 +106,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Broker Server | 2/3 | In progress | - |
+| 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
 | 2. Proposal and Diff Protocol | 0/2 | Not started | - |
 | 3. Discussion and Patches | 0/2 | Not started | - |
 | 4. GSD Workflow Integration | 0/3 | Not started | - |
