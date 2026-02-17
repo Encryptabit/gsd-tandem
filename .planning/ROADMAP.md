@@ -62,11 +62,11 @@ Plans:
   2. Reviewer can attach a counter-patch (alternative unified diff) to a request_changes or comment verdict
   3. Reviews support priority levels (critical, normal, low) that affect the order reviews appear when the reviewer queries pending work
   4. When the reviewer is connected, push notifications alert them to new proposals; when disconnected, polling serves as fallback
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Message threading and multi-round discussion
-- [ ] 03-02: Counter-patch submission, priority levels, and push notification mechanism
+- [ ] 03-01-PLAN.md -- Schema, models, utility modules (priority, notifications), message threading tools, and message tests
+- [ ] 03-02-PLAN.md -- Counter-patch in verdicts, accept/reject tools, priority sort in list_reviews, notification-enhanced polling
 
 ### Phase 4: GSD Workflow Integration
 **Goal**: GSD commands (plan-phase, execute-phase, discuss-phase, verify-work) use the broker to submit proposals and await approval before applying changes
