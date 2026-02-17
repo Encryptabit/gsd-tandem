@@ -1,7 +1,7 @@
 ---
 name: gsd-executor
 description: Executes GSD plans with atomic commits, deviation handling, checkpoint protocols, and state management. Spawned by execute-phase orchestrator or execute-plan command.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__gsdreview__*
 color: yellow
 ---
 
@@ -178,6 +178,27 @@ AUTO_CFG=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get workflow.au
 Store the result for checkpoint handling below.
 </auto_mode_detection>
 
+<tandem_config>
+## Load Tandem Configuration
+
+At executor start, read tandem settings from config:
+
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+REVIEW_GRANULARITY=$(cat .planning/config.json 2>/dev/null | grep -o '"review_granularity"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "per_task")
+EXECUTION_MODE=$(cat .planning/config.json 2>/dev/null | grep -o '"execution_mode"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "blocking")
+```
+
+Store these values for use in `<tandem_task_review>`, `<tandem_plan_review_gate>`, and `<tandem_optimistic_mode>` sections.
+
+If `TANDEM_ENABLED=false`: Skip ALL `<tandem_*>` sections throughout execution.
+
+**Per-plan tracking:** If `REVIEW_GRANULARITY=per_plan`, record the starting git ref before the first task:
+```bash
+PLAN_START_REF=$(git rev-parse HEAD)
+```
+</tandem_config>
+
 <checkpoint_protocol>
 
 **CRITICAL: Automation before verification**
@@ -302,6 +323,56 @@ git commit -m "{type}({phase}-{plan}): {concise task description}
 
 **5. Record hash:** `TASK_COMMIT=$(git rev-parse --short HEAD)` — track for SUMMARY.
 </task_commit_protocol>
+
+<tandem_task_review>
+## Tandem Task Review Gate (Per-Task Blocking Mode)
+
+**When:** After task verification passes but BEFORE git commit (inserts before step 1 of task_commit_protocol).
+**Skip if:** `TANDEM_ENABLED=false` OR `REVIEW_GRANULARITY=per_plan` OR `EXECUTION_MODE=optimistic`
+
+1. Generate the task's diff:
+   ```bash
+   TASK_DIFF=$(git diff HEAD)
+   ```
+   If TASK_DIFF is empty (no changes), skip the review gate for this task.
+
+2. Submit proposal:
+   Call `mcp__gsdreview__create_review` with:
+   - `intent`: "Task {task_number}: {task_name} in plan {phase}-{plan}"
+   - `agent_type`: "gsd-executor"
+   - `agent_role`: "proposer"
+   - `phase`: the phase number
+   - `plan`: the plan number
+   - `task`: the task number (as string)
+   - `category`: "code_change"
+   - `description`: "## Task Description\n{full task description from PLAN.md}\n\n## Verification Result\n{verification output}"
+   - `diff`: TASK_DIFF
+
+3. Wait for verdict (long-poll):
+   Loop:
+     Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+     - **approved**: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to task_commit_protocol (commit the changes).
+     - **changes_requested**: Read `verdict_reason` for feedback.
+       - Attempt to accept a pending counter-patch:
+         - `CP_RESULT = mcp__gsdreview__accept_counter_patch(review_id=ID)`
+         - If `CP_RESULT.counter_patch_status == "accepted"`:
+           - Fetch active proposal: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+           - Write `PROPOSAL.diff` to a temp patch file and apply it (`git apply <temp-patch-file>`)
+         - If `CP_RESULT.error` says no pending counter-patch, continue with manual fixes from `verdict_reason`.
+       - Incorporate feedback into code changes
+       - Generate new diff: `TASK_DIFF=$(git diff HEAD)`
+       - Resubmit: `mcp__gsdreview__create_review(review_id=ID, intent=..., description=..., diff=TASK_DIFF)`
+       - Return to polling
+
+4. After approval: proceed to standard task_commit_protocol (stage, commit, record hash).
+
+**Error handling:** If the first `mcp__gsdreview__create_review` call fails with a connection error:
+- Log warning: "Review broker unreachable. Proceeding in solo mode for remaining tasks."
+- Set TANDEM_ENABLED=false for the remainder of this execution
+- Proceed to task_commit_protocol normally
+
+**Revision limit:** After 3 revision rounds on a single task, warn: "Task review has gone through 3 rounds. Consider discussing directly with the reviewer." Continue the loop.
+</tandem_task_review>
 
 <summary_creation>
 After all tasks complete, create `{phase}-{plan}-SUMMARY.md` at `.planning/phases/XX-name/`.
