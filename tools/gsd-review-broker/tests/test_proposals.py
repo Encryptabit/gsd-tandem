@@ -63,7 +63,11 @@ Refactor the greeting module to improve readability.
 # ---- Helpers ----
 
 
-async def _create_review(ctx: MockContext, **overrides) -> dict:
+async def _create_review(
+    ctx: MockContext,
+    validate_diff_result: tuple[bool, str] | None = None,
+    **overrides,
+) -> dict:
     """Shortcut to create a review with default values."""
     defaults = {
         "intent": "test change",
@@ -72,7 +76,17 @@ async def _create_review(ctx: MockContext, **overrides) -> dict:
         "phase": "1",
     }
     defaults.update(overrides)
-    return await create_review.fn(**defaults, ctx=ctx)
+    if defaults.get("diff") is None:
+        return await create_review.fn(**defaults, ctx=ctx)
+
+    if validate_diff_result is None:
+        validate_diff_result = (True, "")
+    with patch(
+        "gsd_review_broker.tools.validate_diff",
+        new_callable=AsyncMock,
+        return_value=validate_diff_result,
+    ):
+        return await create_review.fn(**defaults, ctx=ctx)
 
 
 # ---- TestCreateReviewWithProposal ----
@@ -133,6 +147,45 @@ class TestCreateReviewWithProposal:
         assert ops["new_file.py"] == "create"
         assert ops["existing.py"] == "modify"
 
+    async def test_create_review_validates_diff_on_submission(
+        self, ctx: MockContext
+    ) -> None:
+        """Submission validates diff and passes repo_root as cwd."""
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ) as mock_validate:
+            result = await create_review.fn(
+                intent="validated create",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="1",
+                description=SAMPLE_DESCRIPTION,
+                diff=SAMPLE_DIFF,
+                ctx=ctx,
+            )
+        assert result["status"] == "pending"
+        mock_validate.assert_awaited_once_with(
+            SAMPLE_DIFF, cwd=ctx.lifespan_context.repo_root
+        )
+
+    async def test_create_review_rejects_invalid_diff_on_submission(
+        self, ctx: MockContext
+    ) -> None:
+        """Invalid diff is rejected before review creation."""
+        result = await _create_review(
+            ctx,
+            diff=SAMPLE_DIFF,
+            validate_diff_result=(False, "patch does not apply"),
+        )
+        assert "error" in result
+        assert "validation_error" in result
+
+        cursor = await ctx.lifespan_context.db.execute("SELECT COUNT(*) AS n FROM reviews")
+        row = await cursor.fetchone()
+        assert row["n"] == 0
+
 
 # ---- TestRevisionFlow ----
 
@@ -157,16 +210,21 @@ class TestRevisionFlow:
         )
 
         # Revise with new content
-        revised = await create_review.fn(
-            intent="revised intent",
-            agent_type="gsd-executor",
-            agent_role="proposer",
-            phase="1",
-            description="revised desc",
-            diff=SAMPLE_MULTI_FILE_DIFF,
-            review_id=review_id,
-            ctx=ctx,
-        )
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            revised = await create_review.fn(
+                intent="revised intent",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="1",
+                description="revised desc",
+                diff=SAMPLE_MULTI_FILE_DIFF,
+                review_id=review_id,
+                ctx=ctx,
+            )
         assert revised["status"] == "pending"
         assert revised["revised"] is True
         assert revised["review_id"] == review_id
@@ -187,6 +245,51 @@ class TestRevisionFlow:
         # affected_files should reflect the new diff
         files = json.loads(row["affected_files"])
         assert len(files) == 2
+
+    async def test_revision_with_invalid_diff_is_rejected(self, ctx: MockContext) -> None:
+        """Revision fails when new diff does not apply; prior review state stays intact."""
+        created = await _create_review(
+            ctx,
+            intent="original intent",
+            description="original desc",
+            diff=SAMPLE_DIFF,
+        )
+        review_id = created["review_id"]
+        await claim_review.fn(review_id=review_id, reviewer_id="reviewer-1", ctx=ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Needs work",
+            ctx=ctx,
+        )
+
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(False, "patch does not apply"),
+        ):
+            revised = await create_review.fn(
+                intent="revised intent",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="1",
+                description="revised desc",
+                diff=SAMPLE_MULTI_FILE_DIFF,
+                review_id=review_id,
+                ctx=ctx,
+            )
+
+        assert "error" in revised
+        assert "validation_error" in revised
+
+        cursor = await ctx.lifespan_context.db.execute(
+            "SELECT status, intent, description FROM reviews WHERE id = ?",
+            (review_id,),
+        )
+        row = await cursor.fetchone()
+        assert row["status"] == "changes_requested"
+        assert row["intent"] == "original intent"
+        assert row["description"] == "original desc"
 
     async def test_revision_from_wrong_state_fails(self, ctx: MockContext) -> None:
         """Revising a review that is not in changes_requested state fails."""
@@ -248,7 +351,7 @@ class TestClaimWithDiffValidation:
             "gsd_review_broker.tools.validate_diff",
             new_callable=AsyncMock,
             return_value=(True, ""),
-        ):
+        ) as mock_validate:
             result = await claim_review.fn(
                 review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
             )
@@ -261,6 +364,9 @@ class TestClaimWithDiffValidation:
         assert len(result["affected_files"]) >= 1
         # Full diff text should NOT be in the claim response
         assert "diff" not in result or result.get("diff") is None
+        mock_validate.assert_awaited_once_with(
+            SAMPLE_DIFF, cwd=ctx.lifespan_context.repo_root
+        )
 
     async def test_claim_review_auto_rejects_bad_diff(self, ctx: MockContext) -> None:
         """Claiming a review with a diff that fails validation auto-rejects it."""
@@ -273,7 +379,7 @@ class TestClaimWithDiffValidation:
             "gsd_review_broker.tools.validate_diff",
             new_callable=AsyncMock,
             return_value=(False, error_msg),
-        ):
+        ) as mock_validate:
             result = await claim_review.fn(
                 review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
             )
@@ -292,6 +398,9 @@ class TestClaimWithDiffValidation:
         assert row["claimed_by"] == "broker-validator"
         assert "Auto-rejected" in row["verdict_reason"]
         assert error_msg in row["verdict_reason"]
+        mock_validate.assert_awaited_once_with(
+            SAMPLE_DIFF, cwd=ctx.lifespan_context.repo_root
+        )
 
 
 # ---- TestGetProposal ----
@@ -410,16 +519,21 @@ class TestFullProposalLifecycle:
         assert rejected["status"] == "changes_requested"
 
         # Step 4: Revise
-        revised = await create_review.fn(
-            intent="revised implementation",
-            agent_type="gsd-executor",
-            agent_role="proposer",
-            phase="1",
-            description="Second attempt with error handling",
-            diff=SAMPLE_MULTI_FILE_DIFF,
-            review_id=review_id,
-            ctx=ctx,
-        )
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            revised = await create_review.fn(
+                intent="revised implementation",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="1",
+                description="Second attempt with error handling",
+                diff=SAMPLE_MULTI_FILE_DIFF,
+                review_id=review_id,
+                ctx=ctx,
+            )
         assert revised["status"] == "pending"
         assert revised["revised"] is True
 

@@ -61,9 +61,10 @@ async def ensure_schema(db: aiosqlite.Connection) -> None:
     for migration in SCHEMA_MIGRATIONS:
         try:
             await db.execute(migration)
-        except Exception:
-            # Column already exists -- silently skip
-            pass
+        except aiosqlite.OperationalError as exc:
+            # Idempotent migration: ignore only duplicate-column errors.
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
 
 async def discover_repo_root() -> str | None:

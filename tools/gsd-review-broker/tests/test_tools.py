@@ -248,6 +248,20 @@ class TestSubmitVerdict:
         assert "error" in result
         assert "comment" in result["error"].lower()
 
+    async def test_submit_verdict_comment_whitespace_only_notes_rejected(
+        self, ctx: MockContext
+    ) -> None:
+        """Comment verdict with whitespace-only reason returns error."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"], verdict="comment", reason="   ", ctx=ctx
+        )
+        assert "error" in result
+        assert "comment" in result["error"].lower()
+
     async def test_submit_verdict_changes_requested_requires_notes(
         self, ctx: MockContext
     ) -> None:
@@ -258,6 +272,23 @@ class TestSubmitVerdict:
         )
         result = await submit_verdict.fn(
             review_id=created["review_id"], verdict="changes_requested", ctx=ctx
+        )
+        assert "error" in result
+        assert "changes_requested" in result["error"]
+
+    async def test_submit_verdict_changes_requested_whitespace_notes_rejected(
+        self, ctx: MockContext
+    ) -> None:
+        """changes_requested verdict with whitespace-only reason returns error."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"],
+            verdict="changes_requested",
+            reason="   ",
+            ctx=ctx,
         )
         assert "error" in result
         assert "changes_requested" in result["error"]

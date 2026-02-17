@@ -54,15 +54,15 @@ Recent decisions affecting current work:
 - [01-03]: Per-process asyncio.Lock write mutex serializes all write operations on shared SQLite connection
 - [01-03]: SELECT+validate+UPDATE inside single BEGIN IMMEDIATE block for atomic state transitions
 - [01-03]: MockContext extracted to conftest.py for cross-test reuse
-- [02-01]: SCHEMA_MIGRATIONS list with try/except for idempotent ALTER TABLE Phase 1 -> Phase 2 migration
+- [02-01]: SCHEMA_MIGRATIONS catches only duplicate-column migration errors (does not mask unrelated SQL failures)
 - [02-01]: discover_repo_root via git rev-parse --show-toplevel, cached in AppContext at startup
 - [02-01]: validate_diff delegates to git apply --check via async subprocess with stdin pipe
 - [02-01]: extract_affected_files uses unidiff.PatchSet with graceful fallback to "[]" on parse failure
 - [02-02]: Mock validate_diff in proposal tests rather than setting up real git repos
-- [02-02]: Diff validation runs inside write_lock to prevent wasted subprocess on concurrent claims
+- [02-02]: Diff validation runs on submit/revision and re-runs inside write_lock on claim
 - [02-02]: claim_review omits full diff from response; use get_proposal for full diff
 - [02-02]: Comment verdict has no state transition -- updates verdict_reason only
-- [02-02]: Notes enforcement: required for changes_requested and comment, optional for approved
+- [02-02]: Notes enforcement: non-whitespace notes required for changes_requested/comment, optional for approved
 
 ### Pending Todos
 

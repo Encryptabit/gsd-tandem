@@ -45,7 +45,7 @@ Plans:
   1. Proposer can submit a proposal with both a natural language intent description and a machine-parseable unified diff, validated on submission
   2. Reviewer can submit a verdict (approve, request_changes, or comment) with optional notes explaining the decision
   3. Diffs are stored in standard unified format as text in SQLite, supporting multi-file diffs
-  4. Broker runs git apply --check on proposal submission and rejects diffs that would fail to apply cleanly
+  4. Broker runs git apply --check on proposal submission and re-validates on claim, rejecting diffs that fail either gate
   5. Full review lifecycle tools are exposed as MCP tools (create, claim, message, verdict, status, close)
 **Plans**: 2 plans
 

@@ -18,7 +18,7 @@ affects: [02-proposal-and-diff-protocol plan 02, phase 03]
 # Tech tracking
 tech-stack:
   added: [unidiff>=0.7.5]
-  patterns: [SCHEMA_MIGRATIONS list with try/except for idempotent ALTER TABLE, async subprocess for git CLI operations, discover_repo_root at lifespan startup]
+  patterns: [SCHEMA_MIGRATIONS list with duplicate-column-only handling for idempotent ALTER TABLE, async subprocess for git CLI operations, discover_repo_root at lifespan startup]
 
 key-files:
   created:
@@ -32,13 +32,13 @@ key-files:
     - tools/gsd-review-broker/src/gsd_review_broker/models.py
 
 key-decisions:
-  - "SCHEMA_MIGRATIONS as a list of ALTER TABLE statements with try/except for idempotent Phase 1 -> Phase 2 migration"
+  - "SCHEMA_MIGRATIONS as a list of ALTER TABLE statements with duplicate-column-only handling for idempotent Phase 1 -> Phase 2 migration"
   - "discover_repo_root uses git rev-parse --show-toplevel via asyncio subprocess, cached once in AppContext at startup"
   - "validate_diff delegates to git apply --check via async subprocess with stdin pipe"
   - "extract_affected_files uses unidiff.PatchSet with graceful fallback to empty JSON array on parse failure"
 
 patterns-established:
-  - "Schema migration pattern: SCHEMA_MIGRATIONS list iterated in ensure_schema with silent skip on existing columns"
+  - "Schema migration pattern: SCHEMA_MIGRATIONS list iterated in ensure_schema with duplicate-column-only skip"
   - "Async subprocess pattern: asyncio.create_subprocess_exec for git CLI operations with communicate()"
 
 # Metrics
@@ -83,7 +83,7 @@ Each task was committed atomically:
 - `tools/gsd-review-broker/tests/test_db_schema.py` - Migration safety test for Phase 1 -> Phase 2
 
 ## Decisions Made
-- SCHEMA_MIGRATIONS as a list of ALTER TABLE statements with try/except for idempotent Phase 1 -> Phase 2 migration
+- SCHEMA_MIGRATIONS as a list of ALTER TABLE statements with duplicate-column-only handling for idempotent Phase 1 -> Phase 2 migration
 - discover_repo_root uses git rev-parse --show-toplevel via asyncio subprocess, cached once in AppContext at startup
 - validate_diff delegates to git apply --check via async subprocess with stdin pipe
 - extract_affected_files uses unidiff.PatchSet with graceful fallback to empty JSON array on parse failure

@@ -19,6 +19,13 @@ def _db_error(tool_name: str, exc: Exception) -> dict:
     return {"error": f"{tool_name} failed due to database error: {exc}"}
 
 
+def _normalize_reason(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    stripped = reason.strip()
+    return stripped if stripped else None
+
+
 async def _rollback_quietly(app: AppContext) -> None:
     with suppress(Exception):
         await app.db.execute("ROLLBACK")
@@ -40,17 +47,25 @@ async def create_review(
     """Create a new review or revise an existing one.
 
     **New review** (omit review_id): Creates a fresh review with the given intent,
-    description, and optional unified diff. Returns review_id and initial status.
+    description, and optional unified diff. Diffs are validated on submission.
+    Returns review_id and initial status.
 
     **Revision** (pass existing review_id): Resubmits a review that is in
     changes_requested state. Replaces intent, description, diff, and affected_files.
     Clears claimed_by and verdict_reason. Returns to pending status.
+    Revised diffs are also validated before persistence.
     """
     app: AppContext = ctx.lifespan_context
 
     # Compute affected_files from diff if provided
     affected_files: str | None = None
     if diff is not None:
+        is_valid, error_detail = await validate_diff(diff, cwd=app.repo_root)
+        if not is_valid:
+            return {
+                "error": "Diff validation failed on submission. Diff does not apply cleanly.",
+                "validation_error": error_detail,
+            }
         affected_files = extract_affected_files(diff)
 
     # --- Revision flow ---
@@ -261,10 +276,12 @@ async def submit_verdict(
     - changes_requested: Requests changes (notes required).
     - comment: Records feedback without changing review state (notes required).
     """
+    normalized_reason = _normalize_reason(reason)
+
     # --- Notes enforcement ---
-    if verdict == "changes_requested" and not reason:
+    if verdict == "changes_requested" and normalized_reason is None:
         return {"error": "Notes (reason) required for 'changes_requested' verdict."}
-    if verdict == "comment" and not reason:
+    if verdict == "comment" and normalized_reason is None:
         return {"error": "Notes (reason) required for 'comment' verdict."}
 
     # --- Comment verdict (no state transition) ---
@@ -292,7 +309,7 @@ async def submit_verdict(
                 await app.db.execute(
                     """UPDATE reviews SET verdict_reason = ?, updated_at = datetime('now')
                        WHERE id = ?""",
-                    (reason, review_id),
+                    (normalized_reason, review_id),
                 )
                 await app.db.execute("COMMIT")
             except Exception as exc:
@@ -302,7 +319,7 @@ async def submit_verdict(
             "review_id": review_id,
             "status": str(current_status),
             "verdict": "comment",
-            "verdict_reason": reason,
+            "verdict_reason": normalized_reason,
         }
 
     # --- Standard verdicts (approved / changes_requested) ---
@@ -336,13 +353,17 @@ async def submit_verdict(
             await app.db.execute(
                 """UPDATE reviews SET status = ?, verdict_reason = ?, updated_at = datetime('now')
                    WHERE id = ?""",
-                (target_status, reason, review_id),
+                (target_status, normalized_reason, review_id),
             )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("submit_verdict", exc)
-    return {"review_id": review_id, "status": str(target_status), "verdict_reason": reason}
+    return {
+        "review_id": review_id,
+        "status": str(target_status),
+        "verdict_reason": normalized_reason,
+    }
 
 
 @mcp.tool

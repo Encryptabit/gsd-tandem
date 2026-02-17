@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import aiosqlite
+import pytest
 
+from gsd_review_broker import db as db_module
 from gsd_review_broker.db import ensure_schema
 
 
@@ -65,5 +67,23 @@ class TestSchemaMigration:
         assert row["description"] is None
         assert row["diff"] is None
         assert row["affected_files"] is None
+
+        await conn.close()
+
+    async def test_non_duplicate_migration_errors_are_not_suppressed(
+        self, monkeypatch
+    ) -> None:
+        """Migration should only ignore duplicate-column errors."""
+        conn = await aiosqlite.connect(":memory:", isolation_level=None)
+        conn.row_factory = aiosqlite.Row
+
+        monkeypatch.setattr(
+            db_module,
+            "SCHEMA_MIGRATIONS",
+            ["ALTER TABLE reviews THIS IS INVALID SQL"],
+        )
+
+        with pytest.raises(aiosqlite.OperationalError):
+            await ensure_schema(conn)
 
         await conn.close()
