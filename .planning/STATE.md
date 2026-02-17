@@ -5,33 +5,34 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 1 - Core Broker Server
+**Current focus:** Phase 2 - Proposal and Diff Protocol
 
 ## Current Position
 
-Phase: 1 of 5 (Core Broker Server)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-02-16 -- Completed 01-03-PLAN.md (poll tool, .mcp.json, live MCP connectivity)
+Phase: 2 of 5 (Proposal and Diff Protocol)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-17 -- Completed 02-01-PLAN.md (data layer and diff utilities)
 
-Progress: [###░░░░░░░] 25% (3/12 plans)
+Progress: [####░░░░░░] 33% (4/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: ~7 minutes
-- Total execution time: ~21 minutes
+- Total plans completed: 4
+- Average duration: ~6.5 minutes
+- Total execution time: ~26 minutes
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Core Broker Server | 3/3 | ~21 min | ~7 min |
+| 2. Proposal and Diff Protocol | 1/2 | ~5 min | ~5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (~5 min), 01-02 (~4 min), 01-03 (~12 min incl. checkpoint)
-- Trend: Stable (01-03 longer due to checkpoint review + concurrency fixes)
+- Last 5 plans: 01-01 (~5 min), 01-02 (~4 min), 01-03 (~12 min incl. checkpoint), 02-01 (~5 min)
+- Trend: Stable
 
 *Updated after each plan completion*
 
@@ -53,6 +54,10 @@ Recent decisions affecting current work:
 - [01-03]: Per-process asyncio.Lock write mutex serializes all write operations on shared SQLite connection
 - [01-03]: SELECT+validate+UPDATE inside single BEGIN IMMEDIATE block for atomic state transitions
 - [01-03]: MockContext extracted to conftest.py for cross-test reuse
+- [02-01]: SCHEMA_MIGRATIONS list with try/except for idempotent ALTER TABLE Phase 1 -> Phase 2 migration
+- [02-01]: discover_repo_root via git rev-parse --show-toplevel, cached in AppContext at startup
+- [02-01]: validate_diff delegates to git apply --check via async subprocess with stdin pipe
+- [02-01]: extract_affected_files uses unidiff.PatchSet with graceful fallback to "[]" on parse failure
 
 ### Pending Todos
 
@@ -65,6 +70,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T00:47:30Z
-Stopped at: Completed 01-03-PLAN.md -- Phase 1 complete
+Last session: 2026-02-17T02:42:12Z
+Stopped at: Completed 02-01-PLAN.md -- Phase 2 Plan 1 complete
 Resume file: None
