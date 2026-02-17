@@ -290,6 +290,45 @@ Clear Current Test section:
 [testing complete]
 ```
 
+<tandem_review_gate>
+## Tandem UAT Review Gate
+
+**When:** After final UAT content is assembled (frontmatter updated, Current Test cleared) but BEFORE the commit.
+**Skip if:** tandem is disabled.
+
+**Step 1: Check tandem config:**
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+```
+
+If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to commit as normal.
+
+**Step 2: Submit finalized UAT for review:**
+Read the full finalized UAT content (`{phase_num}-UAT.md`) into memory.
+
+Call `mcp__gsdreview__create_review` with:
+- `intent`: "Phase {phase_num} UAT verification: {passed} passed, {issues} issues"
+- `agent_type`: "gsd-verifier"
+- `agent_role`: "proposer"
+- `phase`: "{phase_num}"
+- `category`: "verification"
+- `description`: The full finalized UAT.md content (complete markdown)
+- `diff`: null (UAT is content, not diffs)
+
+**Step 3: Wait for verdict (long-poll):**
+Loop:
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to commit.
+  - If `status == "changes_requested"`: Read `verdict_reason`, refine UAT summary/diagnosis notes accordingly, resubmit revised content via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_UAT_MD_CONTENT, ...)`, then return to polling.
+
+**Step 4: After approval, proceed to commit (existing behavior).**
+
+**Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
+- Log warning: "Review broker unreachable. Proceeding in solo mode."
+- Set TANDEM_ENABLED=false for the remainder of this execution
+- Proceed to commit normally
+</tandem_review_gate>
+
 Commit the UAT file:
 ```bash
 node ~/.claude/get-shit-done/bin/gsd-tools.cjs commit "test({phase_num}): complete UAT - {passed} passed, {issues} issues" --files ".planning/phases/XX-name/{phase_num}-UAT.md"

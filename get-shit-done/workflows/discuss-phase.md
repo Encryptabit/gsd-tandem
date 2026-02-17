@@ -360,6 +360,43 @@ mkdir -p ".planning/phases/${padded_phase}-${phase_slug}"
 *Context gathered: [date]*
 ```
 
+<tandem_review_gate>
+## Tandem Context Review Gate
+
+**When:** After full CONTEXT.md content is built in-memory but BEFORE writing to disk.
+**Skip if:** tandem is disabled.
+
+**Step 1: Check tandem config:**
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+```
+
+If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to write CONTEXT.md as normal.
+
+**Step 2: Submit context for review:**
+Call `mcp__gsdreview__create_review` with:
+- `intent`: "Phase {phase_number} context: {phase_name}"
+- `agent_type`: "gsd-discuss"
+- `agent_role`: "proposer"
+- `phase`: "{phase_number}"
+- `category`: "handoff"
+- `description`: The full CONTEXT.md content that was built (complete markdown)
+- `diff`: null (context is content, not diffs)
+
+**Step 3: Wait for verdict (long-poll):**
+Loop:
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write CONTEXT.md to disk.
+  - If `status == "changes_requested"`: Read `verdict_reason`, revise CONTEXT.md content accordingly, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_CONTEXT_MD_CONTENT, ...)`, then return to polling.
+
+**Step 4: After approval, proceed to file write (existing behavior).**
+
+**Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
+- Log warning: "Review broker unreachable. Proceeding in solo mode."
+- Set TANDEM_ENABLED=false for the remainder of this execution
+- Proceed to write CONTEXT.md normally
+</tandem_review_gate>
+
 Write file.
 </step>
 
