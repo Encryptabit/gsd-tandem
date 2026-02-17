@@ -10,6 +10,7 @@ allowed-tools:
   - Edit
   - Write
   - Task
+  - mcp__gsdreview__*
 ---
 <objective>
 Validate built features through conversational testing with persistent state.

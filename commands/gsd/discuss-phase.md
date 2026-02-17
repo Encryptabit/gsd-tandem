@@ -10,6 +10,7 @@ allowed-tools:
   - Grep
   - AskUserQuestion
   - Task
+  - mcp__gsdreview__*
 ---
 
 <objective>

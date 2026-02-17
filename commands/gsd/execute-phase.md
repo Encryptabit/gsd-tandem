@@ -12,6 +12,7 @@ allowed-tools:
   - Task
   - TodoWrite
   - AskUserQuestion
+  - mcp__gsdreview__*
 ---
 <objective>
 Execute all plans in a phase using wave-based parallel execution.
