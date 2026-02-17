@@ -155,18 +155,27 @@ async def list_reviews(
 ) -> dict:
     """List reviews, optionally filtered by status.
 
+    Results are sorted by priority (critical first, then normal, then low)
+    and by creation time within each priority tier.
+
     Use status='pending' to find reviews awaiting a reviewer.
     """
     app: AppContext = ctx.lifespan_context
+    order_clause = (
+        "ORDER BY CASE COALESCE(priority, 'normal') "
+        "WHEN 'critical' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 END, "
+        "created_at ASC"
+    )
     if status is not None:
         cursor = await app.db.execute(
-            "SELECT id, status, intent, agent_type, phase, created_at "
-            "FROM reviews WHERE status = ?",
+            "SELECT id, status, intent, agent_type, phase, priority, created_at "
+            f"FROM reviews WHERE status = ? {order_clause}",
             (status,),
         )
     else:
         cursor = await app.db.execute(
-            "SELECT id, status, intent, agent_type, phase, created_at FROM reviews"
+            "SELECT id, status, intent, agent_type, phase, priority, created_at "
+            f"FROM reviews {order_clause}"
         )
     rows = await cursor.fetchall()
     reviews = [
@@ -176,6 +185,7 @@ async def list_reviews(
             "intent": row["intent"],
             "agent_type": row["agent_type"],
             "phase": row["phase"],
+            "priority": row["priority"],
             "created_at": row["created_at"],
         }
         for row in rows
@@ -277,14 +287,19 @@ async def submit_verdict(
     review_id: str,
     verdict: str,
     reason: str | None = None,
+    counter_patch: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Submit a verdict on a claimed review.
 
     Verdict must be 'approved', 'changes_requested', or 'comment'.
-    - approved: Approves the review (notes optional).
-    - changes_requested: Requests changes (notes required).
+    - approved: Approves the review (notes optional). Counter-patches not allowed.
+    - changes_requested: Requests changes (notes required). May include counter_patch.
     - comment: Records feedback without changing review state (notes required).
+      May include counter_patch.
+
+    If counter_patch is provided, it is validated via git apply --check before storage.
+    The counter-patch is stored with status 'pending' for the proposer to accept or reject.
     """
     normalized_reason = _normalize_reason(reason)
 
@@ -294,9 +309,24 @@ async def submit_verdict(
     if verdict == "comment" and normalized_reason is None:
         return {"error": "Notes (reason) required for 'comment' verdict."}
 
+    # --- Counter-patch validation (before any branch) ---
+    app: AppContext = ctx.lifespan_context
+    counter_affected: str | None = None
+    if counter_patch is not None:
+        if verdict not in ("changes_requested", "comment"):
+            return {
+                "error": "Counter-patches only allowed with changes_requested or comment verdicts"
+            }
+        is_valid, error_detail = await validate_diff(counter_patch, cwd=app.repo_root)
+        if not is_valid:
+            return {
+                "error": "Counter-patch diff validation failed",
+                "validation_error": error_detail,
+            }
+        counter_affected = extract_affected_files(counter_patch)
+
     # --- Comment verdict (no state transition) ---
     if verdict == "comment":
-        app: AppContext = ctx.lifespan_context
         async with app.write_lock:
             try:
                 await app.db.execute("BEGIN IMMEDIATE")
@@ -316,21 +346,36 @@ async def submit_verdict(
                             "Comments are only valid on claimed or in_review reviews."
                         )
                     }
-                await app.db.execute(
-                    """UPDATE reviews SET verdict_reason = ?, updated_at = datetime('now')
-                       WHERE id = ?""",
-                    (normalized_reason, review_id),
-                )
+                if counter_patch is not None:
+                    await app.db.execute(
+                        """UPDATE reviews SET verdict_reason = ?,
+                               counter_patch = ?, counter_patch_affected_files = ?,
+                               counter_patch_status = 'pending',
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (normalized_reason, counter_patch, counter_affected, review_id),
+                    )
+                else:
+                    await app.db.execute(
+                        """UPDATE reviews SET verdict_reason = ?, updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (normalized_reason, review_id),
+                    )
                 await app.db.execute("COMMIT")
             except Exception as exc:
                 await _rollback_quietly(app)
                 return _db_error("submit_verdict", exc)
-        return {
+        if counter_patch is not None:
+            app.notifications.notify(review_id)
+        result = {
             "review_id": review_id,
             "status": str(current_status),
             "verdict": "comment",
             "verdict_reason": normalized_reason,
         }
+        if counter_patch is not None:
+            result["has_counter_patch"] = True
+        return result
 
     # --- Standard verdicts (approved / changes_requested) ---
     valid_verdicts = {
@@ -345,7 +390,6 @@ async def submit_verdict(
             )
         }
     target_status = valid_verdicts[verdict]
-    app = ctx.lifespan_context
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -360,20 +404,36 @@ async def submit_verdict(
             except ValueError as exc:
                 await app.db.execute("ROLLBACK")
                 return {"error": str(exc)}
-            await app.db.execute(
-                """UPDATE reviews SET status = ?, verdict_reason = ?, updated_at = datetime('now')
-                   WHERE id = ?""",
-                (target_status, normalized_reason, review_id),
-            )
+            if counter_patch is not None:
+                await app.db.execute(
+                    """UPDATE reviews SET status = ?, verdict_reason = ?,
+                           counter_patch = ?, counter_patch_affected_files = ?,
+                           counter_patch_status = 'pending',
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (target_status, normalized_reason, counter_patch, counter_affected, review_id),
+                )
+            else:
+                await app.db.execute(
+                    """UPDATE reviews SET status = ?, verdict_reason = ?,
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (target_status, normalized_reason, review_id),
+                )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("submit_verdict", exc)
-    return {
+    if counter_patch is not None:
+        app.notifications.notify(review_id)
+    result = {
         "review_id": review_id,
         "status": str(target_status),
         "verdict_reason": normalized_reason,
     }
+    if counter_patch is not None:
+        result["has_counter_patch"] = True
+    return result
 
 
 @mcp.tool
@@ -410,19 +470,132 @@ async def close_review(
 
 
 @mcp.tool
+async def accept_counter_patch(
+    review_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Accept a pending counter-patch, replacing the review's active diff.
+
+    Re-validates the counter-patch via git apply --check before replacing.
+    If the counter-patch no longer applies cleanly, returns an error without
+    modifying review state (the proposer can then reject it instead).
+    """
+    app: AppContext = ctx.lifespan_context
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            cursor = await app.db.execute(
+                """SELECT status, counter_patch, counter_patch_affected_files,
+                          counter_patch_status
+                   FROM reviews WHERE id = ?""",
+                (review_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+            if row["counter_patch_status"] != "pending":
+                await app.db.execute("ROLLBACK")
+                return {"error": "No pending counter-patch to accept"}
+
+            # Re-validate: diff may be stale
+            is_valid, error_detail = await validate_diff(
+                row["counter_patch"], cwd=app.repo_root
+            )
+            if not is_valid:
+                await app.db.execute("ROLLBACK")
+                return {
+                    "error": "Counter-patch no longer applies cleanly",
+                    "validation_error": error_detail,
+                }
+
+            await app.db.execute(
+                """UPDATE reviews
+                   SET diff = counter_patch,
+                       affected_files = counter_patch_affected_files,
+                       counter_patch = NULL,
+                       counter_patch_affected_files = NULL,
+                       counter_patch_status = 'accepted',
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (review_id,),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("accept_counter_patch", exc)
+
+    app.notifications.notify(review_id)
+    return {
+        "review_id": review_id,
+        "counter_patch_status": "accepted",
+        "message": "Counter-patch accepted as active diff",
+    }
+
+
+@mcp.tool
+async def reject_counter_patch(
+    review_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Reject a pending counter-patch, clearing counter-patch columns."""
+    app: AppContext = ctx.lifespan_context
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            cursor = await app.db.execute(
+                "SELECT counter_patch_status FROM reviews WHERE id = ?",
+                (review_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+            if row["counter_patch_status"] != "pending":
+                await app.db.execute("ROLLBACK")
+                return {"error": "No pending counter-patch to reject"}
+            await app.db.execute(
+                """UPDATE reviews
+                   SET counter_patch = NULL,
+                       counter_patch_affected_files = NULL,
+                       counter_patch_status = 'rejected',
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (review_id,),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("reject_counter_patch", exc)
+
+    app.notifications.notify(review_id)
+    return {"review_id": review_id, "counter_patch_status": "rejected"}
+
+
+@mcp.tool
 async def get_review_status(
     review_id: str,
+    wait: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Check the current status of a review. Call repeatedly to poll for changes.
 
-    Returns immediately -- does NOT block waiting for reviewer action.
-    Recommended polling interval: 3 seconds.
+    By default returns immediately. If wait=True, blocks up to 25 seconds waiting
+    for a state change notification before returning current status. This reduces
+    polling latency without requiring frequent requests.
+
+    Recommended usage:
+    - wait=False (default): Traditional polling, recommended interval 3 seconds.
+    - wait=True: Long-poll mode, call again immediately after each response.
     """
     app: AppContext = ctx.lifespan_context
+
+    if wait:
+        await app.notifications.wait_for_change(review_id, timeout=25.0)
+
     cursor = await app.db.execute(
         """SELECT id, status, intent, agent_type, agent_role, phase, plan, task,
-                  claimed_by, verdict_reason, updated_at
+                  claimed_by, verdict_reason, priority, current_round, updated_at
            FROM reviews WHERE id = ?""",
         (review_id,),
     )
@@ -440,6 +613,8 @@ async def get_review_status(
         "task": row["task"],
         "claimed_by": row["claimed_by"],
         "verdict_reason": row["verdict_reason"],
+        "priority": row["priority"],
+        "current_round": row["current_round"],
         "updated_at": row["updated_at"],
     }
 
