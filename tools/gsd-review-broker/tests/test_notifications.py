@@ -14,6 +14,18 @@ class TestNotificationBus:
         bus.notify("no-waiter-review")
         # No exception = pass
 
+    async def test_notify_before_waiter_is_not_lost(self) -> None:
+        """A pre-existing notify is observed when waiting from an older baseline."""
+        bus = NotificationBus()
+        review_id = "sticky-notification-review"
+
+        # Signal before any waiter starts waiting.
+        bus.notify(review_id)
+
+        # Wait from an older baseline version (0 -> 1 change already happened).
+        result = await bus.wait_for_change(review_id, timeout=0.1, since_version=0)
+        assert result is True
+
     async def test_wait_returns_true_on_signal(self) -> None:
         """wait_for_change returns True when notified before timeout."""
         bus = NotificationBus()

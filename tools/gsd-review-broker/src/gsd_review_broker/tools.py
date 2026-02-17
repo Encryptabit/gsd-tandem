@@ -209,6 +209,8 @@ async def claim_review(
     has_diff flag) but NOT the full diff text. Use get_proposal to retrieve the diff.
     """
     app: AppContext = ctx.lifespan_context
+    auto_rejected_result: dict | None = None
+    diff_text: str | None = None
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -246,22 +248,28 @@ async def claim_review(
                         ),
                     )
                     await app.db.execute("COMMIT")
-                    return {
+                    auto_rejected_result = {
                         "review_id": review_id,
                         "status": "changes_requested",
                         "auto_rejected": True,
                         "validation_error": error_detail,
                     }
+                # Fall through to unified post-commit notify/return path.
 
-            await app.db.execute(
-                """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
-                   WHERE id = ?""",
-                (ReviewStatus.CLAIMED, reviewer_id, review_id),
-            )
-            await app.db.execute("COMMIT")
+            if auto_rejected_result is None:
+                await app.db.execute(
+                    """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (ReviewStatus.CLAIMED, reviewer_id, review_id),
+                )
+                await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("claim_review", exc)
+
+    app.notifications.notify(review_id)
+    if auto_rejected_result is not None:
+        return auto_rejected_result
 
     # Build response with inline proposal metadata
     result: dict = {
@@ -365,8 +373,7 @@ async def submit_verdict(
             except Exception as exc:
                 await _rollback_quietly(app)
                 return _db_error("submit_verdict", exc)
-        if counter_patch is not None:
-            app.notifications.notify(review_id)
+        app.notifications.notify(review_id)
         result = {
             "review_id": review_id,
             "status": str(current_status),
@@ -424,8 +431,7 @@ async def submit_verdict(
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("submit_verdict", exc)
-    if counter_patch is not None:
-        app.notifications.notify(review_id)
+    app.notifications.notify(review_id)
     result = {
         "review_id": review_id,
         "status": str(target_status),
@@ -466,6 +472,8 @@ async def close_review(
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("close_review", exc)
+    app.notifications.notify(review_id)
+    app.notifications.cleanup(review_id)
     return {"review_id": review_id, "status": ReviewStatus.CLOSED}
 
 
@@ -722,8 +730,9 @@ async def add_message(
 
             # Insert message
             await app.db.execute(
-                """INSERT INTO messages (id, review_id, sender_role, round, body, metadata, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                """INSERT INTO messages (
+                       id, review_id, sender_role, round, body, metadata, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (msg_id, review_id, sender_role, current_round, body, metadata),
             )
             await app.db.execute("COMMIT")
@@ -761,14 +770,14 @@ async def get_discussion(
         cursor = await app.db.execute(
             """SELECT id, sender_role, round, body, metadata, created_at
                FROM messages WHERE review_id = ? AND round = ?
-               ORDER BY created_at ASC""",
+               ORDER BY rowid ASC""",
             (review_id, round),
         )
     else:
         cursor = await app.db.execute(
             """SELECT id, sender_role, round, body, metadata, created_at
                FROM messages WHERE review_id = ?
-               ORDER BY created_at ASC""",
+               ORDER BY rowid ASC""",
             (review_id,),
         )
 

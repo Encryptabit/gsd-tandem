@@ -237,6 +237,30 @@ class TestGetDiscussion:
         assert "error" in result
         assert "not found" in result["error"]
 
+    async def test_order_stable_when_timestamps_equal(self, ctx: MockContext) -> None:
+        """Discussion order remains insertion-ordered even when created_at values match."""
+        review_id = await _create_and_claim(ctx)
+        await add_message.fn(
+            review_id=review_id, sender_role="reviewer", body="first", ctx=ctx
+        )
+        await add_message.fn(
+            review_id=review_id, sender_role="proposer", body="second", ctx=ctx
+        )
+        await add_message.fn(
+            review_id=review_id, sender_role="reviewer", body="third", ctx=ctx
+        )
+
+        # Force same timestamp across all rows to exercise deterministic ordering.
+        db = ctx.lifespan_context.db
+        await db.execute(
+            "UPDATE messages SET created_at = '2026-01-01 00:00:00' WHERE review_id = ?",
+            (review_id,),
+        )
+
+        result = await get_discussion.fn(review_id=review_id, ctx=ctx)
+        bodies = [m["body"] for m in result["messages"]]
+        assert bodies == ["first", "second", "third"]
+
 
 # ---- TestRoundTracking ----
 

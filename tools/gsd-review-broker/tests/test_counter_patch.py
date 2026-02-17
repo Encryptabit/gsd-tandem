@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 from gsd_review_broker.tools import (
     accept_counter_patch,
     claim_review,
+    close_review,
     create_review,
     get_review_status,
     list_reviews,
@@ -447,6 +448,80 @@ class TestPrioritySort:
 
 
 class TestNotificationPolling:
+    async def test_get_review_status_wait_wakes_on_claim_transition(
+        self, ctx: MockContext
+    ) -> None:
+        """wait=True wakes and returns claimed status when claim_review commits."""
+        result = await _create_review(ctx)
+        review_id = result["review_id"]
+
+        async def poll_with_wait():
+            return await get_review_status.fn(
+                review_id=review_id, wait=True, ctx=ctx
+            )
+
+        poll_task = asyncio.create_task(poll_with_wait())
+        await asyncio.sleep(0.05)
+
+        await claim_review.fn(review_id=review_id, reviewer_id="reviewer-1", ctx=ctx)
+
+        status_result = await asyncio.wait_for(poll_task, timeout=5.0)
+        assert "error" not in status_result
+        assert status_result["id"] == review_id
+        assert status_result["status"] == "claimed"
+
+    async def test_get_review_status_wait_wakes_on_verdict_without_counter_patch(
+        self, ctx: MockContext
+    ) -> None:
+        """wait=True wakes on normal verdict updates (without counter-patch)."""
+        review_id = await _create_and_claim(ctx)
+
+        async def poll_with_wait():
+            return await get_review_status.fn(
+                review_id=review_id, wait=True, ctx=ctx
+            )
+
+        poll_task = asyncio.create_task(poll_with_wait())
+        await asyncio.sleep(0.05)
+
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Needs revision",
+            ctx=ctx,
+        )
+
+        status_result = await asyncio.wait_for(poll_task, timeout=5.0)
+        assert "error" not in status_result
+        assert status_result["id"] == review_id
+        assert status_result["status"] == "changes_requested"
+
+    async def test_get_review_status_wait_wakes_on_close_transition(
+        self, ctx: MockContext
+    ) -> None:
+        """wait=True wakes and returns closed status after close_review."""
+        review_id = await _create_and_claim(ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="approved",
+            ctx=ctx,
+        )
+
+        async def poll_with_wait():
+            return await get_review_status.fn(
+                review_id=review_id, wait=True, ctx=ctx
+            )
+
+        poll_task = asyncio.create_task(poll_with_wait())
+        await asyncio.sleep(0.05)
+
+        await close_review.fn(review_id=review_id, ctx=ctx)
+
+        status_result = await asyncio.wait_for(poll_task, timeout=5.0)
+        assert "error" not in status_result
+        assert status_result["id"] == review_id
+        assert status_result["status"] == "closed"
+
     async def test_get_review_status_wait_returns_on_signal(
         self, ctx: MockContext
     ) -> None:
