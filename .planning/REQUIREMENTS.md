@@ -19,18 +19,18 @@
 - [x] **PROTO-03**: Reviewer can submit a verdict: approve, request_changes, or comment, each with optional notes
 - [x] **PROTO-04**: Proposer creates a review and reviewer claims it, with one reviewer per review
 - [x] **PROTO-05**: Diffs are transported in standard unified format, stored as text in SQLite, supporting multi-file diffs
-- [ ] **PROTO-06**: Reviewer can submit counter-patches (alternative unified diffs) attached to request_changes or comment verdicts
+- [x] **PROTO-06**: Reviewer can submit counter-patches (alternative unified diffs) attached to request_changes or comment verdicts
 - [x] **PROTO-07**: Broker runs `git apply --check` on proposal submission to detect conflicts before review begins
-- [ ] **PROTO-08**: Reviews support priority levels (critical, normal, low) affecting reviewer queue ordering
+- [x] **PROTO-08**: Reviews support priority levels (critical, normal, low) affecting reviewer queue ordering
 
 ### Agent Interaction
 
 - [x] **INTER-01**: Every message and proposal includes full agent identity: agent_type, agent_role, phase, plan, task number
 - [x] **INTER-02**: Proposer blocks (poll-and-return with configurable interval) until reviewer responds, respecting MCP tool timeout constraints
-- [ ] **INTER-03**: Messages form a threaded conversation per review, supporting multi-round back-and-forth (propose -> request changes -> revise -> re-review)
+- [x] **INTER-03**: Messages form a threaded conversation per review, supporting multi-round back-and-forth (propose -> request changes -> revise -> re-review)
 - [ ] **INTER-04**: Review granularity is configurable: per-task (default) or per-plan, settable in .planning/config.json
 - [ ] **INTER-05**: Optimistic execution mode available: proposer applies changes provisionally, rolls back on rejection (opt-in per config)
-- [ ] **INTER-06**: Push notification mechanism available when reviewer is connected, falling back to polling when not
+- [x] **INTER-06**: Push notification mechanism available when reviewer is connected, falling back to polling when not
 
 ### GSD Integration
 
@@ -86,15 +86,15 @@
 | PROTO-03 | Phase 2 | Complete |
 | PROTO-04 | Phase 1 | Complete |
 | PROTO-05 | Phase 2 | Complete |
-| PROTO-06 | Phase 3 | Pending |
+| PROTO-06 | Phase 3 | Complete |
 | PROTO-07 | Phase 2 | Complete |
-| PROTO-08 | Phase 3 | Pending |
+| PROTO-08 | Phase 3 | Complete |
 | INTER-01 | Phase 1 | Complete |
 | INTER-02 | Phase 1 | Complete |
-| INTER-03 | Phase 3 | Pending |
+| INTER-03 | Phase 3 | Complete |
 | INTER-04 | Phase 4 | Pending |
 | INTER-05 | Phase 4 | Pending |
-| INTER-06 | Phase 3 | Pending |
+| INTER-06 | Phase 3 | Complete |
 | GSDI-01 | Phase 4 | Pending |
 | GSDI-02 | Phase 4 | Pending |
 | GSDI-03 | Phase 4 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-17 after Phase 2 completion*
+*Last updated: 2026-02-17 after Phase 3 completion*

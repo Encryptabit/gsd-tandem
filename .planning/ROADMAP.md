@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
 - [x] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
-- [ ] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
+- [x] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
 - [ ] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
 - [ ] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
 
@@ -65,8 +65,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Schema, models, utility modules (priority, notifications), message threading tools, and message tests
-- [ ] 03-02-PLAN.md -- Counter-patch in verdicts, accept/reject tools, priority sort in list_reviews, notification-enhanced polling
+- [x] 03-01-PLAN.md -- Schema, models, utility modules (priority, notifications), message threading tools, and message tests
+- [x] 03-02-PLAN.md -- Counter-patch in verdicts, accept/reject tools, priority sort in list_reviews, notification-enhanced polling
 
 ### Phase 4: GSD Workflow Integration
 **Goal**: GSD commands (plan-phase, execute-phase, discuss-phase, verify-work) use the broker to submit proposals and await approval before applying changes
@@ -108,6 +108,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
 | 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
-| 3. Discussion and Patches | 0/2 | Not started | - |
+| 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
 | 4. GSD Workflow Integration | 0/3 | Not started | - |
 | 5. Observability and Validation | 0/2 | Not started | - |
