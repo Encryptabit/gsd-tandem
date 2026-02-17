@@ -65,6 +65,19 @@ SCHEMA_MIGRATIONS: list[str] = [
     "ALTER TABLE reviews ADD COLUMN counter_patch_status TEXT",
     # Phase 4 migrations
     "ALTER TABLE reviews ADD COLUMN category TEXT",
+    # Phase 5 migrations -- audit_events table
+    """CREATE TABLE IF NOT EXISTS audit_events (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        review_id   TEXT NOT NULL REFERENCES reviews(id),
+        event_type  TEXT NOT NULL,
+        actor       TEXT,
+        old_status  TEXT,
+        new_status  TEXT,
+        metadata    TEXT,
+        created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_audit_review ON audit_events(review_id)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type)",
 ]
 
 

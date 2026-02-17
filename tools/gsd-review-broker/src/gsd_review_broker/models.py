@@ -44,6 +44,21 @@ class Category(StrEnum):
     HANDOFF = "handoff"
 
 
+class AuditEventType(StrEnum):
+    """Audit event types for the append-only audit_events table."""
+
+    REVIEW_CREATED = "review_created"
+    REVIEW_REVISED = "review_revised"
+    REVIEW_CLAIMED = "review_claimed"
+    REVIEW_AUTO_REJECTED = "review_auto_rejected"
+    VERDICT_SUBMITTED = "verdict_submitted"
+    VERDICT_COMMENT = "verdict_comment"
+    REVIEW_CLOSED = "review_closed"
+    COUNTER_PATCH_ACCEPTED = "counter_patch_accepted"
+    COUNTER_PATCH_REJECTED = "counter_patch_rejected"
+    MESSAGE_SENT = "message_sent"
+
+
 class AgentIdentity(BaseModel):
     """Identity of an agent interacting with the broker."""
 
