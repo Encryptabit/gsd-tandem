@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS reviews (
                     CHECK(status IN ('pending','claimed','in_review',
                                      'approved','changes_requested','closed')),
     intent          TEXT NOT NULL,
+    description     TEXT,
+    diff            TEXT,
+    affected_files  TEXT,
     agent_type      TEXT NOT NULL,
     agent_role      TEXT NOT NULL,
     phase           TEXT NOT NULL,
@@ -36,6 +39,12 @@ CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
 CREATE INDEX IF NOT EXISTS idx_reviews_parent ON reviews(parent_id);
 """
 
+SCHEMA_MIGRATIONS: list[str] = [
+    "ALTER TABLE reviews ADD COLUMN description TEXT",
+    "ALTER TABLE reviews ADD COLUMN diff TEXT",
+    "ALTER TABLE reviews ADD COLUMN affected_files TEXT",
+]
+
 
 @dataclass
 class AppContext:
@@ -43,11 +52,34 @@ class AppContext:
 
     db: aiosqlite.Connection
     write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    repo_root: str | None = None
 
 
 async def ensure_schema(db: aiosqlite.Connection) -> None:
-    """Create tables and indexes if they don't exist."""
+    """Create tables and indexes if they don't exist, then apply migrations."""
     await db.executescript(SCHEMA_SQL)
+    for migration in SCHEMA_MIGRATIONS:
+        try:
+            await db.execute(migration)
+        except Exception:
+            # Column already exists -- silently skip
+            pass
+
+
+async def discover_repo_root() -> str | None:
+    """Discover the git repository root directory."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "rev-parse", "--show-toplevel",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            return stdout.decode("utf-8", errors="replace").strip()
+    except Exception:
+        pass
+    return None
 
 
 @asynccontextmanager
@@ -64,8 +96,9 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA foreign_keys=ON")
     await ensure_schema(db)
+    repo_root = await discover_repo_root()
     try:
-        yield AppContext(db=db)
+        yield AppContext(db=db, repo_root=repo_root)
     finally:
         await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         await db.close()

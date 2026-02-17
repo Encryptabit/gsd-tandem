@@ -35,6 +35,9 @@ class Review(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     status: ReviewStatus = ReviewStatus.PENDING
     intent: str
+    description: str | None = None
+    diff: str | None = None
+    affected_files: str | None = None
     agent_type: str
     agent_role: str
     phase: str
