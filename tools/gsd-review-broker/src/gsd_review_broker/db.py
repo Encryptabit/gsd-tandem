@@ -63,6 +63,8 @@ SCHEMA_MIGRATIONS: list[str] = [
     "ALTER TABLE reviews ADD COLUMN counter_patch TEXT",
     "ALTER TABLE reviews ADD COLUMN counter_patch_affected_files TEXT",
     "ALTER TABLE reviews ADD COLUMN counter_patch_status TEXT",
+    # Phase 4 migrations
+    "ALTER TABLE reviews ADD COLUMN category TEXT",
 ]
 
 

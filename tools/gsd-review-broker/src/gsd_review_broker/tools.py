@@ -40,6 +40,7 @@ async def create_review(
     phase: str,
     plan: str | None = None,
     task: str | None = None,
+    category: str | None = None,
     description: str | None = None,
     diff: str | None = None,
     review_id: str | None = None,
@@ -122,9 +123,9 @@ async def create_review(
             await app.db.execute(
                 """INSERT INTO reviews (id, status, intent, description, diff,
                                         affected_files, agent_type, agent_role,
-                                        phase, plan, task, priority,
+                                        phase, plan, task, priority, category,
                                         created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
                 (
                     new_review_id,
                     ReviewStatus.PENDING,
@@ -138,6 +139,7 @@ async def create_review(
                     plan,
                     task,
                     str(priority),
+                    category,
                 ),
             )
             await app.db.execute("COMMIT")
@@ -151,14 +153,16 @@ async def create_review(
 @mcp.tool
 async def list_reviews(
     status: str | None = None,
+    category: str | None = None,
     ctx: Context = None,
 ) -> dict:
-    """List reviews, optionally filtered by status.
+    """List reviews, optionally filtered by status and/or category.
 
     Results are sorted by priority (critical first, then normal, then low)
     and by creation time within each priority tier.
 
     Use status='pending' to find reviews awaiting a reviewer.
+    Use category to filter by review type (e.g. 'plan_review', 'code_change').
     """
     app: AppContext = ctx.lifespan_context
     order_clause = (
@@ -166,17 +170,24 @@ async def list_reviews(
         "WHEN 'critical' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 END, "
         "created_at ASC"
     )
+    conditions: list[str] = []
+    params: list[str] = []
     if status is not None:
-        cursor = await app.db.execute(
-            "SELECT id, status, intent, agent_type, phase, priority, created_at "
-            f"FROM reviews WHERE status = ? {order_clause}",
-            (status,),
-        )
-    else:
-        cursor = await app.db.execute(
-            "SELECT id, status, intent, agent_type, phase, priority, created_at "
-            f"FROM reviews {order_clause}"
-        )
+        conditions.append("status = ?")
+        params.append(status)
+    if category is not None:
+        conditions.append("category = ?")
+        params.append(category)
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    cursor = await app.db.execute(
+        "SELECT id, status, intent, agent_type, phase, priority, category, created_at "
+        f"FROM reviews {where_clause} {order_clause}",
+        params,
+    )
     rows = await cursor.fetchall()
     reviews = [
         {
@@ -186,6 +197,7 @@ async def list_reviews(
             "agent_type": row["agent_type"],
             "phase": row["phase"],
             "priority": row["priority"],
+            "category": row["category"],
             "created_at": row["created_at"],
         }
         for row in rows
@@ -215,7 +227,7 @@ async def claim_review(
         try:
             await app.db.execute("BEGIN IMMEDIATE")
             cursor = await app.db.execute(
-                "SELECT status, diff, intent, description, affected_files "
+                "SELECT status, diff, intent, description, affected_files, category "
                 "FROM reviews WHERE id = ?",
                 (review_id,),
             )
@@ -277,6 +289,7 @@ async def claim_review(
         "status": ReviewStatus.CLAIMED,
         "claimed_by": reviewer_id,
         "intent": row["intent"],
+        "category": row["category"],
     }
     if row["description"] is not None:
         result["description"] = row["description"]
@@ -603,7 +616,8 @@ async def get_review_status(
 
     cursor = await app.db.execute(
         """SELECT id, status, intent, agent_type, agent_role, phase, plan, task,
-                  claimed_by, verdict_reason, priority, current_round, updated_at
+                  claimed_by, verdict_reason, priority, current_round, category,
+                  updated_at
            FROM reviews WHERE id = ?""",
         (review_id,),
     )
@@ -623,6 +637,7 @@ async def get_review_status(
         "verdict_reason": row["verdict_reason"],
         "priority": row["priority"],
         "current_round": row["current_round"],
+        "category": row["category"],
         "updated_at": row["updated_at"],
     }
 
@@ -639,7 +654,7 @@ async def get_proposal(
     """
     app: AppContext = ctx.lifespan_context
     cursor = await app.db.execute(
-        """SELECT id, status, intent, description, diff, affected_files
+        """SELECT id, status, intent, description, diff, affected_files, category
            FROM reviews WHERE id = ?""",
         (review_id,),
     )
@@ -661,6 +676,7 @@ async def get_proposal(
         "description": row["description"],
         "diff": row["diff"],
         "affected_files": affected_files,
+        "category": row["category"],
     }
 
 

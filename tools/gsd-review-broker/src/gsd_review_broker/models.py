@@ -35,6 +35,15 @@ class CounterPatchStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class Category(StrEnum):
+    """Review category for filtering and prioritization."""
+
+    PLAN_REVIEW = "plan_review"
+    CODE_CHANGE = "code_change"
+    VERIFICATION = "verification"
+    HANDOFF = "handoff"
+
+
 class AgentIdentity(BaseModel):
     """Identity of an agent interacting with the broker."""
 
