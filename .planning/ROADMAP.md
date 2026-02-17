@@ -47,11 +47,11 @@ Plans:
   3. Diffs are stored in standard unified format as text in SQLite, supporting multi-file diffs
   4. Broker runs git apply --check on proposal submission and rejects diffs that would fail to apply cleanly
   5. Full review lifecycle tools are exposed as MCP tools (create, claim, message, verdict, status, close)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Proposal creation with intent + diff, diff storage and retrieval
-- [ ] 02-02: Verdict submission, diff validation with git apply --check, full tool surface
+- [ ] 02-01-PLAN.md -- Schema evolution, diff utilities, model updates, repo root discovery, and diff_utils tests
+- [ ] 02-02-PLAN.md -- Extend tool handlers (create_review, claim_review, submit_verdict), add get_proposal, proposal lifecycle tests
 
 ### Phase 3: Discussion and Patches
 **Goal**: Proposer and reviewer can have multi-round conversations within a review, with the reviewer able to supply alternative patches and prioritize reviews
