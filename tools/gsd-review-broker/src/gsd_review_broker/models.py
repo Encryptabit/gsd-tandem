@@ -19,6 +19,22 @@ class ReviewStatus(StrEnum):
     CLOSED = "closed"
 
 
+class Priority(StrEnum):
+    """Review priority inferred from agent identity."""
+
+    CRITICAL = "critical"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+class CounterPatchStatus(StrEnum):
+    """Status of a counter-patch proposed by a reviewer."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 class AgentIdentity(BaseModel):
     """Identity of an agent interacting with the broker."""
 

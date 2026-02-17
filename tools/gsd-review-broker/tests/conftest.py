@@ -9,6 +9,7 @@ import aiosqlite
 import pytest
 
 from gsd_review_broker.db import AppContext, ensure_schema
+from gsd_review_broker.notifications import NotificationBus
 
 
 @dataclass
@@ -32,4 +33,4 @@ async def db() -> AsyncIterator[aiosqlite.Connection]:
 @pytest.fixture
 def ctx(db: aiosqlite.Connection) -> MockContext:
     """Create a MockContext wrapping the in-memory db fixture."""
-    return MockContext(lifespan_context=AppContext(db=db))
+    return MockContext(lifespan_context=AppContext(db=db, notifications=NotificationBus()))

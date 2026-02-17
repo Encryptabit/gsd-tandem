@@ -11,6 +11,8 @@ from pathlib import Path
 import aiosqlite
 from fastmcp import FastMCP
 
+from gsd_review_broker.notifications import NotificationBus
+
 DB_PATH = Path(".planning") / "codex_review_broker.sqlite3"
 
 SCHEMA_SQL = """\
@@ -37,12 +39,30 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
 CREATE INDEX IF NOT EXISTS idx_reviews_parent ON reviews(parent_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id          TEXT PRIMARY KEY,
+    review_id   TEXT NOT NULL REFERENCES reviews(id),
+    sender_role TEXT NOT NULL CHECK(sender_role IN ('proposer', 'reviewer')),
+    round       INTEGER NOT NULL DEFAULT 1,
+    body        TEXT NOT NULL,
+    metadata    TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_review ON messages(review_id, round);
 """
 
 SCHEMA_MIGRATIONS: list[str] = [
+    # Phase 2 migrations
     "ALTER TABLE reviews ADD COLUMN description TEXT",
     "ALTER TABLE reviews ADD COLUMN diff TEXT",
     "ALTER TABLE reviews ADD COLUMN affected_files TEXT",
+    # Phase 3 migrations
+    "ALTER TABLE reviews ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal'",
+    "ALTER TABLE reviews ADD COLUMN current_round INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE reviews ADD COLUMN counter_patch TEXT",
+    "ALTER TABLE reviews ADD COLUMN counter_patch_affected_files TEXT",
+    "ALTER TABLE reviews ADD COLUMN counter_patch_status TEXT",
 ]
 
 
@@ -53,6 +73,7 @@ class AppContext:
     db: aiosqlite.Connection
     write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     repo_root: str | None = None
+    notifications: NotificationBus = field(default_factory=NotificationBus)
 
 
 async def ensure_schema(db: aiosqlite.Connection) -> None:
