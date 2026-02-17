@@ -78,12 +78,12 @@ Plans:
   3. Sub-agents (gsd-executor, gsd-planner) can submit proposals directly with their own agent identity without going through the parent command
   4. discuss-phase and verify-work can send handoff messages through the broker so the reviewer has awareness of workflow transitions
   5. Review granularity (per-task or per-plan) and execution mode (blocking or optimistic) are configurable via .planning/config.json
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: Fork GSD commands with MCP tool permissions, checkpoint logic in plan-phase and execute-phase
-- [ ] 04-02: Sub-agent proposal support, discuss/verify handoff messages
-- [ ] 04-03: Configurable granularity (per-task/per-plan) and optimistic execution mode
+- [ ] 04-01-PLAN.md -- Category field support in broker, tandem config in config.json, category tests
+- [ ] 04-02-PLAN.md -- MCP tool permissions in commands, tandem review gates in planner/discuss/verify
+- [ ] 04-03-PLAN.md -- Executor tandem integration: blocking, optimistic, per-plan modes
 
 ### Phase 5: Observability and Validation
 **Goal**: Users can monitor broker activity in real-time and query complete review history for any project
