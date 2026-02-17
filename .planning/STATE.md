@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 4 complete -- GSD workflow integration done
+**Current focus:** Phase 5 in progress -- observability and validation
 
 ## Current Position
 
-Phase: 4 of 5 (GSD Workflow Integration)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-02-17 -- Completed Phase 4 (all 3 plans)
+Phase: 5 of 5 (Observability and Validation)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-17 -- Completed 05-01-PLAN.md
 
-Progress: [#########░] 83% (10/12 plans)
+Progress: [##########░] 92% (11/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
+- Total plans completed: 11
 - Average duration: ~5.6 minutes
-- Total execution time: ~56 minutes
+- Total execution time: ~62 minutes
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [#########░] 83% (10/12 plans)
 | 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
 | 3. Discussion and Patches | 2/2 | ~13 min | ~6.5 min |
 | 4. GSD Workflow Integration | 3/3 | ~11 min | ~3.7 min |
+| 5. Observability and Validation | 1/2 | ~6 min | ~6 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (~5 min), 04-01 (~3 min), 04-02 (~4 min), 04-03 (~4 min)
-- Trend: Accelerating (workflow integration plans are fast -- mostly markdown edits)
+- Last 5 plans: 04-01 (~3 min), 04-02 (~4 min), 04-03 (~4 min), 05-01 (~6 min)
+- Trend: Stable (05-01 slightly longer due to large tools.py modifications)
 
 *Updated after each plan completion*
 
@@ -63,10 +64,15 @@ Recent decisions affecting current work:
 - [04-03]: Per-plan optimistic normalized to per-plan blocking for v1
 - [04-03]: Optimistic rejection reverts all commits from rejected task onward (deterministic cascade)
 - [04-03]: Broker connection error falls back to solo mode for entire session
+- [05-01]: Audit events use string values directly (not enum references) since column is TEXT
+- [05-01]: Activity feed uses correlated subqueries for simplicity at small data volumes
+- [05-01]: Approval rate from audit_events verdict_submitted events via json_extract
+- [05-01]: Average time-in-state uses LEAD() window function over consecutive audit events
+- [05-01]: ISO 8601 timestamps only on new tool output; existing tools unchanged
 
 ### Pending Todos
 
-None yet.
+- Future Goal: Add a master-reviewer orchestration layer for reviewer pools. Master reviewer is the single verdict authority, tracks file/symbol ownership across active reviews, reconciles overlap/conflicts from sub-reviewers, and delegates non-overlapping review packets back to sub-reviewers.
 
 ### Blockers/Concerns
 
@@ -75,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T20:15:00Z
-Stopped at: Completed Phase 4 -- all 3 plans executed
+Last session: 2026-02-17T22:14:56Z
+Stopped at: Completed 05-01-PLAN.md (audit infrastructure + observability tools)
 Resume file: None
