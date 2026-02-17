@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 3 in progress -- discussion and patches
+**Current focus:** Phase 3 complete -- discussion and patches done
 
 ## Current Position
 
 Phase: 3 of 5 (Discussion and Patches)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-02-17 -- Completed 03-01-PLAN.md (discussion foundation and message threading)
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-02-17 -- Completed 03-02-PLAN.md (counter-patch lifecycle, priority sort, notification polling)
 
-Progress: [######░░░░] 50% (6/12 plans)
+Progress: [#######░░░] 58% (7/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: ~6.5 minutes
-- Total execution time: ~40 minutes
+- Total plans completed: 7
+- Average duration: ~6.4 minutes
+- Total execution time: ~45 minutes
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [######░░░░] 50% (6/12 plans)
 |-------|-------|-------|----------|
 | 1. Core Broker Server | 3/3 | ~21 min | ~7 min |
 | 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
-| 3. Discussion and Patches | 1/2 | ~8 min | ~8 min |
+| 3. Discussion and Patches | 2/2 | ~13 min | ~6.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (~12 min incl. checkpoint), 02-01 (~5 min), 02-02 (~6 min), 03-01 (~8 min)
+- Last 5 plans: 02-01 (~5 min), 02-02 (~6 min), 03-01 (~8 min), 03-02 (~5 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -68,6 +68,10 @@ Recent decisions affecting current work:
 - [03-01]: Turn alternation is global across rounds (not reset per round) -- flat chronological conversation
 - [03-01]: Priority fixed at review creation time, not modified on revision
 - [03-01]: Notifications fire outside write_lock (after COMMIT) to avoid holding lock during event signaling
+- [03-02]: Counter-patches restricted to changes_requested and comment verdicts only (not approved)
+- [03-02]: Re-validation on accept prevents stale counter-patches from replacing active diff
+- [03-02]: Stale accept returns error without modifying review state (proposer retains choice)
+- [03-02]: Reject NULLs content but keeps counter_patch_status='rejected' for audit trail
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T08:00:00Z
-Stopped at: Phase 3 execution -- 03-02 Task 1 committed (845b46b), Task 2 (tests) not started
-Resume file: .planning/phases/03-discussion-and-patches/.continue-here.md
+Last session: 2026-02-17T07:55:00Z
+Stopped at: Completed 03-02-PLAN.md -- Phase 3 complete
+Resume file: None
