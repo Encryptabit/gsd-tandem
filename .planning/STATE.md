@@ -5,33 +5,33 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 2 - Proposal and Diff Protocol
+**Current focus:** Phase 3 - Watcher and Integration (Phase 2 complete)
 
 ## Current Position
 
 Phase: 2 of 5 (Proposal and Diff Protocol)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-02-17 -- Completed 02-01-PLAN.md (data layer and diff utilities)
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-02-17 -- Completed 02-02-PLAN.md (tool handlers and get_proposal)
 
-Progress: [####░░░░░░] 33% (4/12 plans)
+Progress: [#####░░░░░] 42% (5/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: ~6.5 minutes
-- Total execution time: ~26 minutes
+- Total plans completed: 5
+- Average duration: ~6.2 minutes
+- Total execution time: ~32 minutes
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Core Broker Server | 3/3 | ~21 min | ~7 min |
-| 2. Proposal and Diff Protocol | 1/2 | ~5 min | ~5 min |
+| 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (~5 min), 01-02 (~4 min), 01-03 (~12 min incl. checkpoint), 02-01 (~5 min)
+- Last 5 plans: 01-02 (~4 min), 01-03 (~12 min incl. checkpoint), 02-01 (~5 min), 02-02 (~6 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -58,6 +58,11 @@ Recent decisions affecting current work:
 - [02-01]: discover_repo_root via git rev-parse --show-toplevel, cached in AppContext at startup
 - [02-01]: validate_diff delegates to git apply --check via async subprocess with stdin pipe
 - [02-01]: extract_affected_files uses unidiff.PatchSet with graceful fallback to "[]" on parse failure
+- [02-02]: Mock validate_diff in proposal tests rather than setting up real git repos
+- [02-02]: Diff validation runs inside write_lock to prevent wasted subprocess on concurrent claims
+- [02-02]: claim_review omits full diff from response; use get_proposal for full diff
+- [02-02]: Comment verdict has no state transition -- updates verdict_reason only
+- [02-02]: Notes enforcement: required for changes_requested and comment, optional for approved
 
 ### Pending Todos
 
@@ -70,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T02:42:12Z
-Stopped at: Completed 02-01-PLAN.md -- Phase 2 Plan 1 complete
+Last session: 2026-02-17T02:55:00Z
+Stopped at: Completed 02-02-PLAN.md -- Phase 2 complete
 Resume file: None
