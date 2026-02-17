@@ -68,7 +68,8 @@ For each task:
    - Execute task, apply deviation rules as needed
    - Handle auth errors as authentication gates
    - Run verification, confirm done criteria
-   - Commit (see task_commit_protocol)
+   - If `TANDEM_ENABLED=true` AND `REVIEW_GRANULARITY=per_task` AND `EXECUTION_MODE=blocking`, run `<tandem_task_review>` before any commit
+   - Otherwise commit per normal flow (see task_commit_protocol)
    - Track completion + commit hash for Summary
 
 2. **If `type="checkpoint:*"`:**
@@ -348,21 +349,21 @@ git commit -m "{type}({phase}-{plan}): {concise task description}
    - `description`: "## Task Description\n{full task description from PLAN.md}\n\n## Verification Result\n{verification output}"
    - `diff`: TASK_DIFF
 
-3. Wait for verdict (long-poll):
-   Loop:
-     Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
-     - **approved**: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to task_commit_protocol (commit the changes).
-     - **changes_requested**: Read `verdict_reason` for feedback.
-       - Attempt to accept a pending counter-patch:
-         - `CP_RESULT = mcp__gsdreview__accept_counter_patch(review_id=ID)`
-         - If `CP_RESULT.counter_patch_status == "accepted"`:
-           - Fetch active proposal: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
-           - Write `PROPOSAL.diff` to a temp patch file and apply it (`git apply <temp-patch-file>`)
-         - If `CP_RESULT.error` says no pending counter-patch, continue with manual fixes from `verdict_reason`.
-       - Incorporate feedback into code changes
-       - Generate new diff: `TASK_DIFF=$(git diff HEAD)`
-       - Resubmit: `mcp__gsdreview__create_review(review_id=ID, intent=..., description=..., diff=TASK_DIFF)`
-       - Return to polling
+    3. Wait for verdict (long-poll):
+       Loop:
+         Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+         - **approved**: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to task_commit_protocol (commit the changes).
+         - **changes_requested**: Read `verdict_reason` for feedback.
+           - Check proposal for counter-patch context: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+           - If `PROPOSAL.counter_patch_status == "pending"`:
+             - Review the counter-patch diff content before deciding.
+             - If reasonable: `CP_RESULT = mcp__gsdreview__accept_counter_patch(review_id=ID)`
+               - If accepted, fetch active proposal again and apply active diff: `UPDATED = mcp__gsdreview__get_proposal(review_id=ID)` then `git apply <temp-patch-file-from-UPDATED.diff>`
+             - If not reasonable: `mcp__gsdreview__reject_counter_patch(review_id=ID)` and continue with manual fixes from `verdict_reason`.
+           - Incorporate feedback into code changes
+           - Generate new diff: `TASK_DIFF=$(git diff HEAD)`
+           - Resubmit: `mcp__gsdreview__create_review(review_id=ID, intent=..., description=..., diff=TASK_DIFF)`
+           - Return to polling
 
 4. After approval: proceed to standard task_commit_protocol (stage, commit, record hash).
 

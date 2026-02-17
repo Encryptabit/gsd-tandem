@@ -17,6 +17,7 @@ from gsd_review_broker.tools import (
     claim_review,
     close_review,
     create_review,
+    get_proposal,
     get_review_status,
     list_reviews,
     reject_counter_patch,
@@ -161,6 +162,31 @@ class TestCounterPatchSubmission:
         )
         row = await cursor.fetchone()
         assert row["counter_patch_status"] == "pending"
+
+    async def test_get_proposal_includes_pending_counter_patch_fields(
+        self, ctx: MockContext
+    ) -> None:
+        """get_proposal exposes pending counter-patch fields for proposer decisions."""
+        review_id = await _create_and_claim(ctx)
+
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            await submit_verdict.fn(
+                review_id=review_id,
+                verdict="changes_requested",
+                reason="use this instead",
+                counter_patch=COUNTER_PATCH,
+                ctx=ctx,
+            )
+
+        proposal = await get_proposal.fn(review_id=review_id, ctx=ctx)
+        assert "error" not in proposal
+        assert proposal["counter_patch_status"] == "pending"
+        assert proposal["counter_patch"] == COUNTER_PATCH
+        assert proposal["counter_patch_affected_files"] is not None
 
     async def test_counter_patch_on_approve_rejected(self, ctx: MockContext) -> None:
         """Counter-patch with approved verdict is rejected."""

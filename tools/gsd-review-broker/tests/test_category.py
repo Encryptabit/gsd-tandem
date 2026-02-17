@@ -155,6 +155,35 @@ class TestCategoryRetrieval:
         assert result["status"] == "claimed"
         assert result["category"] == "verification"
 
+    async def test_claim_review_auto_rejected_includes_category(
+        self, ctx: MockContext
+    ) -> None:
+        """Auto-rejected claim responses still include category."""
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            created = await _create_with_category(
+                ctx, category="code_change", diff=SAMPLE_DIFF
+            )
+
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(False, "diff no longer applies"),
+        ):
+            result = await claim_review.fn(
+                review_id=created["review_id"],
+                reviewer_id="reviewer-1",
+                ctx=ctx,
+            )
+
+        assert "error" not in result
+        assert result["status"] == "changes_requested"
+        assert result["auto_rejected"] is True
+        assert result["category"] == "code_change"
+
     async def test_list_reviews_includes_category_field(
         self, ctx: MockContext
     ) -> None:

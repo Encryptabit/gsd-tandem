@@ -265,6 +265,7 @@ async def claim_review(
                         "status": "changes_requested",
                         "auto_rejected": True,
                         "validation_error": error_detail,
+                        "category": row["category"],
                     }
                 # Fall through to unified post-commit notify/return path.
 
@@ -654,7 +655,8 @@ async def get_proposal(
     """
     app: AppContext = ctx.lifespan_context
     cursor = await app.db.execute(
-        """SELECT id, status, intent, description, diff, affected_files, category
+        """SELECT id, status, intent, description, diff, affected_files, category,
+                  counter_patch, counter_patch_affected_files, counter_patch_status
            FROM reviews WHERE id = ?""",
         (review_id,),
     )
@@ -669,6 +671,13 @@ async def get_proposal(
         except (json.JSONDecodeError, TypeError):
             affected_files = row["affected_files"]
 
+    counter_patch_affected_files = None
+    if row["counter_patch_affected_files"] is not None:
+        try:
+            counter_patch_affected_files = json.loads(row["counter_patch_affected_files"])
+        except (json.JSONDecodeError, TypeError):
+            counter_patch_affected_files = row["counter_patch_affected_files"]
+
     return {
         "id": row["id"],
         "status": row["status"],
@@ -677,6 +686,9 @@ async def get_proposal(
         "diff": row["diff"],
         "affected_files": affected_files,
         "category": row["category"],
+        "counter_patch": row["counter_patch"],
+        "counter_patch_affected_files": counter_patch_affected_files,
+        "counter_patch_status": row["counter_patch_status"],
     }
 
 
