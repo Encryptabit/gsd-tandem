@@ -11,6 +11,7 @@ from fastmcp import Context
 from gsd_review_broker.db import AppContext
 from gsd_review_broker.diff_utils import extract_affected_files, validate_diff
 from gsd_review_broker.models import ReviewStatus
+from gsd_review_broker.priority import infer_priority
 from gsd_review_broker.server import mcp
 from gsd_review_broker.state_machine import validate_transition
 
@@ -90,6 +91,10 @@ async def create_review(
                     """UPDATE reviews
                        SET status = ?, intent = ?, description = ?, diff = ?,
                            affected_files = ?, claimed_by = NULL, verdict_reason = NULL,
+                           current_round = current_round + 1,
+                           counter_patch = NULL,
+                           counter_patch_affected_files = NULL,
+                           counter_patch_status = NULL,
                            updated_at = datetime('now')
                        WHERE id = ?""",
                     (
@@ -105,18 +110,21 @@ async def create_review(
             except Exception as exc:
                 await _rollback_quietly(app)
                 return _db_error("create_review", exc)
+        app.notifications.notify(review_id)
         return {"review_id": review_id, "status": ReviewStatus.PENDING, "revised": True}
 
     # --- New review flow ---
     new_review_id = str(uuid.uuid4())
+    priority = infer_priority(agent_type, agent_role, phase, plan, task)
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
             await app.db.execute(
                 """INSERT INTO reviews (id, status, intent, description, diff,
                                         affected_files, agent_type, agent_role,
-                                        phase, plan, task, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                                        phase, plan, task, priority,
+                                        created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
                 (
                     new_review_id,
                     ReviewStatus.PENDING,
@@ -129,12 +137,14 @@ async def create_review(
                     phase,
                     plan,
                     task,
+                    str(priority),
                 ),
             )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("create_review", exc)
+    app.notifications.notify(new_review_id)
     return {"review_id": new_review_id, "status": ReviewStatus.PENDING}
 
 
@@ -469,3 +479,140 @@ async def get_proposal(
         "diff": row["diff"],
         "affected_files": affected_files,
     }
+
+
+@mcp.tool
+async def add_message(
+    review_id: str,
+    sender_role: str,
+    body: str,
+    metadata: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Add a message to a review's discussion thread.
+
+    Messages form a flat chronological conversation per review with strict turn
+    alternation. Either role can send the first message, but subsequent messages
+    must alternate between proposer and reviewer.
+
+    Only reviews in 'claimed' or 'changes_requested' state accept messages.
+    """
+    if sender_role not in ("proposer", "reviewer"):
+        return {"error": f"Invalid sender_role: {sender_role!r}. Must be 'proposer' or 'reviewer'."}
+
+    app: AppContext = ctx.lifespan_context
+    msg_id = str(uuid.uuid4())
+
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+
+            # Verify review exists and is in a valid state for messaging
+            cursor = await app.db.execute(
+                "SELECT status, current_round FROM reviews WHERE id = ?",
+                (review_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+
+            current_status = ReviewStatus(row["status"])
+            if current_status not in (ReviewStatus.CLAIMED, ReviewStatus.CHANGES_REQUESTED):
+                await app.db.execute("ROLLBACK")
+                return {
+                    "error": (
+                        f"Cannot add message to review in '{current_status}' state. "
+                        "Messages are only valid on claimed or changes_requested reviews."
+                    )
+                }
+
+            current_round = row["current_round"]
+
+            # Turn enforcement: check last message sender
+            cursor = await app.db.execute(
+                "SELECT sender_role FROM messages WHERE review_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (review_id,),
+            )
+            last_msg = await cursor.fetchone()
+            if last_msg is not None and last_msg["sender_role"] == sender_role:
+                await app.db.execute("ROLLBACK")
+                return {
+                    "error": (
+                        f"Turn violation: '{sender_role}' sent the last message. "
+                        "Messages must alternate between proposer and reviewer."
+                    )
+                }
+
+            # Insert message
+            await app.db.execute(
+                """INSERT INTO messages (id, review_id, sender_role, round, body, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (msg_id, review_id, sender_role, current_round, body, metadata),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("add_message", exc)
+
+    # Fire notification outside write_lock
+    app.notifications.notify(review_id)
+
+    return {"message_id": msg_id, "review_id": review_id, "round": current_round}
+
+
+@mcp.tool
+async def get_discussion(
+    review_id: str,
+    round: int | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Retrieve the discussion thread for a review.
+
+    Returns all messages in chronological order. Optionally filter by round number.
+    This is a read-only operation -- no state changes occur.
+    """
+    app: AppContext = ctx.lifespan_context
+
+    # Verify review exists
+    cursor = await app.db.execute(
+        "SELECT id FROM reviews WHERE id = ?", (review_id,)
+    )
+    if await cursor.fetchone() is None:
+        return {"error": f"Review not found: {review_id}"}
+
+    if round is not None:
+        cursor = await app.db.execute(
+            """SELECT id, sender_role, round, body, metadata, created_at
+               FROM messages WHERE review_id = ? AND round = ?
+               ORDER BY created_at ASC""",
+            (review_id, round),
+        )
+    else:
+        cursor = await app.db.execute(
+            """SELECT id, sender_role, round, body, metadata, created_at
+               FROM messages WHERE review_id = ?
+               ORDER BY created_at ASC""",
+            (review_id,),
+        )
+
+    rows = await cursor.fetchall()
+    messages = []
+    for msg_row in rows:
+        parsed_metadata = None
+        if msg_row["metadata"] is not None:
+            try:
+                parsed_metadata = json.loads(msg_row["metadata"])
+            except (json.JSONDecodeError, TypeError):
+                parsed_metadata = msg_row["metadata"]
+        messages.append({
+            "id": msg_row["id"],
+            "sender_role": msg_row["sender_role"],
+            "round": msg_row["round"],
+            "body": msg_row["body"],
+            "metadata": parsed_metadata,
+            "created_at": msg_row["created_at"],
+        })
+
+    return {"review_id": review_id, "messages": messages, "count": len(messages)}
