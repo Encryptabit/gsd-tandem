@@ -109,5 +109,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
 | 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
 | 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
-| 4. GSD Workflow Integration | 0/3 | Not started | - |
+| 4. GSD Workflow Integration | 1/3 | In progress | - |
 | 5. Observability and Validation | 0/2 | Not started | - |

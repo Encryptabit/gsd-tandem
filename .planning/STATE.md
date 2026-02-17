@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 3 complete -- discussion and patches done
+**Current focus:** Phase 4 in progress -- GSD workflow integration
 
 ## Current Position
 
-Phase: 3 of 5 (Discussion and Patches)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-02-17 -- Completed 03-02-PLAN.md (counter-patch lifecycle, priority sort, notification polling)
+Phase: 4 of 5 (GSD Workflow Integration)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-02-17 -- Completed 04-01-PLAN.md (category field, tandem config)
 
-Progress: [#######░░░] 58% (7/12 plans)
+Progress: [########░░] 67% (8/12 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: ~6.4 minutes
-- Total execution time: ~45 minutes
+- Total plans completed: 8
+- Average duration: ~6.0 minutes
+- Total execution time: ~48 minutes
 
 **By Phase:**
 
@@ -30,10 +30,11 @@ Progress: [#######░░░] 58% (7/12 plans)
 | 1. Core Broker Server | 3/3 | ~21 min | ~7 min |
 | 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
 | 3. Discussion and Patches | 2/2 | ~13 min | ~6.5 min |
+| 4. GSD Workflow Integration | 1/3 | ~3 min | ~3 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (~5 min), 02-02 (~6 min), 03-01 (~8 min), 03-02 (~5 min)
-- Trend: Stable
+- Last 5 plans: 02-02 (~6 min), 03-01 (~8 min), 03-02 (~5 min), 04-01 (~3 min)
+- Trend: Accelerating (simple schema/config plans faster)
 
 *Updated after each plan completion*
 
@@ -72,6 +73,10 @@ Recent decisions affecting current work:
 - [03-02]: Re-validation on accept prevents stale counter-patches from replacing active diff
 - [03-02]: Stale accept returns error without modifying review state (proposer retains choice)
 - [03-02]: Reject NULLs content but keeps counter_patch_status='rejected' for audit trail
+- [04-01]: Category stored as free-text for forward compatibility; StrEnum provides canonical constants
+- [04-01]: Category set at creation time, not modified on revision
+- [04-01]: Dynamic WHERE clause in list_reviews supports combined status+category filtering
+- [04-01]: Tandem config defaults: tandem_enabled=false, review_granularity=per_task, execution_mode=blocking
 
 ### Pending Todos
 
@@ -84,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-17T07:55:00Z
-Stopped at: Completed 03-02-PLAN.md -- Phase 3 complete
+Last session: 2026-02-17T19:35:00Z
+Stopped at: Completed 04-01-PLAN.md -- category field and tandem config
 Resume file: None
