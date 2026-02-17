@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiosqlite
@@ -41,6 +42,7 @@ class AppContext:
     """Application context holding the database connection."""
 
     db: aiosqlite.Connection
+    write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 async def ensure_schema(db: aiosqlite.Connection) -> None:

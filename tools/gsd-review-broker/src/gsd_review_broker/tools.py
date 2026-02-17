@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import suppress
 
 from fastmcp import Context
 
@@ -10,6 +11,15 @@ from gsd_review_broker.db import AppContext
 from gsd_review_broker.models import ReviewStatus
 from gsd_review_broker.server import mcp
 from gsd_review_broker.state_machine import validate_transition
+
+
+def _db_error(tool_name: str, exc: Exception) -> dict:
+    return {"error": f"{tool_name} failed due to database error: {exc}"}
+
+
+async def _rollback_quietly(app: AppContext) -> None:
+    with suppress(Exception):
+        await app.db.execute("ROLLBACK")
 
 
 @mcp.tool
@@ -25,18 +35,28 @@ async def create_review(
     """Create a new review for a proposed change. Returns review_id and initial status."""
     app: AppContext = ctx.lifespan_context
     review_id = str(uuid.uuid4())
-    try:
-        await app.db.execute("BEGIN IMMEDIATE")
-        await app.db.execute(
-            """INSERT INTO reviews (id, status, intent, agent_type, agent_role,
-                                    phase, plan, task, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
-            (review_id, ReviewStatus.PENDING, intent, agent_type, agent_role, phase, plan, task),
-        )
-        await app.db.execute("COMMIT")
-    except Exception:
-        await app.db.execute("ROLLBACK")
-        raise
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            await app.db.execute(
+                """INSERT INTO reviews (id, status, intent, agent_type, agent_role,
+                                        phase, plan, task, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                (
+                    review_id,
+                    ReviewStatus.PENDING,
+                    intent,
+                    agent_type,
+                    agent_role,
+                    phase,
+                    plan,
+                    task,
+                ),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("create_review", exc)
     return {"review_id": review_id, "status": ReviewStatus.PENDING}
 
 
@@ -83,26 +103,29 @@ async def claim_review(
 ) -> dict:
     """Claim a pending review for evaluation. Only pending reviews can be claimed."""
     app: AppContext = ctx.lifespan_context
-    cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
-    row = await cursor.fetchone()
-    if row is None:
-        return {"error": f"Review not found: {review_id}"}
-    current_status = ReviewStatus(row["status"])
-    try:
-        validate_transition(current_status, ReviewStatus.CLAIMED)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    try:
-        await app.db.execute("BEGIN IMMEDIATE")
-        await app.db.execute(
-            """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
-               WHERE id = ?""",
-            (ReviewStatus.CLAIMED, reviewer_id, review_id),
-        )
-        await app.db.execute("COMMIT")
-    except Exception:
-        await app.db.execute("ROLLBACK")
-        raise
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+            current_status = ReviewStatus(row["status"])
+            try:
+                validate_transition(current_status, ReviewStatus.CLAIMED)
+            except ValueError as exc:
+                await app.db.execute("ROLLBACK")
+                return {"error": str(exc)}
+            await app.db.execute(
+                """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (ReviewStatus.CLAIMED, reviewer_id, review_id),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("claim_review", exc)
     return {"review_id": review_id, "status": ReviewStatus.CLAIMED, "claimed_by": reviewer_id}
 
 
@@ -124,26 +147,29 @@ async def submit_verdict(
         }
     target_status = valid_verdicts[verdict]
     app: AppContext = ctx.lifespan_context
-    cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
-    row = await cursor.fetchone()
-    if row is None:
-        return {"error": f"Review not found: {review_id}"}
-    current_status = ReviewStatus(row["status"])
-    try:
-        validate_transition(current_status, target_status)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    try:
-        await app.db.execute("BEGIN IMMEDIATE")
-        await app.db.execute(
-            """UPDATE reviews SET status = ?, verdict_reason = ?, updated_at = datetime('now')
-               WHERE id = ?""",
-            (target_status, reason, review_id),
-        )
-        await app.db.execute("COMMIT")
-    except Exception:
-        await app.db.execute("ROLLBACK")
-        raise
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+            current_status = ReviewStatus(row["status"])
+            try:
+                validate_transition(current_status, target_status)
+            except ValueError as exc:
+                await app.db.execute("ROLLBACK")
+                return {"error": str(exc)}
+            await app.db.execute(
+                """UPDATE reviews SET status = ?, verdict_reason = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (target_status, reason, review_id),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("submit_verdict", exc)
     return {"review_id": review_id, "status": str(target_status), "verdict_reason": reason}
 
 
@@ -154,26 +180,29 @@ async def close_review(
 ) -> dict:
     """Close a review that has reached a terminal verdict (approved or changes_requested)."""
     app: AppContext = ctx.lifespan_context
-    cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
-    row = await cursor.fetchone()
-    if row is None:
-        return {"error": f"Review not found: {review_id}"}
-    current_status = ReviewStatus(row["status"])
-    try:
-        validate_transition(current_status, ReviewStatus.CLOSED)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    try:
-        await app.db.execute("BEGIN IMMEDIATE")
-        await app.db.execute(
-            """UPDATE reviews SET status = ?, updated_at = datetime('now')
-               WHERE id = ?""",
-            (ReviewStatus.CLOSED, review_id),
-        )
-        await app.db.execute("COMMIT")
-    except Exception:
-        await app.db.execute("ROLLBACK")
-        raise
+    async with app.write_lock:
+        try:
+            await app.db.execute("BEGIN IMMEDIATE")
+            cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                await app.db.execute("ROLLBACK")
+                return {"error": f"Review not found: {review_id}"}
+            current_status = ReviewStatus(row["status"])
+            try:
+                validate_transition(current_status, ReviewStatus.CLOSED)
+            except ValueError as exc:
+                await app.db.execute("ROLLBACK")
+                return {"error": str(exc)}
+            await app.db.execute(
+                """UPDATE reviews SET status = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (ReviewStatus.CLOSED, review_id),
+            )
+            await app.db.execute("COMMIT")
+        except Exception as exc:
+            await _rollback_quietly(app)
+            return _db_error("close_review", exc)
     return {"review_id": review_id, "status": ReviewStatus.CLOSED}
 
 

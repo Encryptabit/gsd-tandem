@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from gsd_review_broker.tools import (
@@ -132,6 +133,25 @@ class TestClaimReview:
         )
         assert "error" in result
         assert "not found" in result["error"]
+
+    async def test_claim_review_concurrent_calls_are_serialized(
+        self, ctx: MockContext
+    ) -> None:
+        created = await _create_review(ctx)
+        review_id = created["review_id"]
+
+        async def claim(reviewer_id: str) -> dict:
+            return await claim_review.fn(
+                review_id=review_id, reviewer_id=reviewer_id, ctx=ctx
+            )
+
+        r1, r2 = await asyncio.gather(claim("reviewer-1"), claim("reviewer-2"))
+        successes = [result for result in (r1, r2) if result.get("status") == "claimed"]
+        errors = [result for result in (r1, r2) if "error" in result]
+
+        assert len(successes) == 1
+        assert len(errors) == 1
+        assert "Invalid transition" in errors[0]["error"]
 
 
 # ---- submit_verdict tests ----
