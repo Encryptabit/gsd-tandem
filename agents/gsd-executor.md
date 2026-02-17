@@ -374,6 +374,120 @@ git commit -m "{type}({phase}-{plan}): {concise task description}
 **Revision limit:** After 3 revision rounds on a single task, warn: "Task review has gone through 3 rounds. Consider discussing directly with the reviewer." Continue the loop.
 </tandem_task_review>
 
+<tandem_optimistic_mode>
+## Tandem Optimistic Execution Mode
+
+**When:** `TANDEM_ENABLED=true` AND `EXECUTION_MODE=optimistic` AND `REVIEW_GRANULARITY=per_task`
+**Skip if:** `TANDEM_ENABLED=false` OR `EXECUTION_MODE=blocking` OR `REVIEW_GRANULARITY=per_plan`
+
+In optimistic mode, the executor commits changes immediately (standard flow) and submits proposals after commit. Reviews happen asynchronously while execution continues.
+
+**Per-task flow:**
+
+1. Execute task normally
+2. Run task_commit_protocol (stage, commit) — do NOT wait for review
+3. Record commit hash: `TASK_COMMIT_HASH=$(git rev-parse HEAD)`
+4. Generate diff from the commit: `TASK_DIFF=$(git diff HEAD~1..HEAD)`
+5. Submit proposal (non-blocking — do not poll):
+   Call `mcp__gsdreview__create_review` with same fields as tandem_task_review but with the post-commit diff.
+   Store: `OPTIMISTIC_COMMITS.append({task_number, review_id: ID, commit_hash: TASK_COMMIT_HASH})`
+6. Continue to next task immediately
+
+**At plan completion** (after all tasks, before summary_creation):
+
+Check all pending reviews using the `OPTIMISTIC_COMMITS` list captured during per-task submission.
+
+Then evaluate in order:
+```
+for each entry in OPTIMISTIC_COMMITS:
+  status = mcp__gsdreview__get_review_status(review_id=entry.review_id, wait=false)
+  if status.status == "approved":
+    mcp__gsdreview__close_review(review_id=entry.review_id)
+    # OK — move to next
+  elif status.status == "changes_requested":
+    # STOP optimistic execution
+    # Warn: "Task {N} rejected by reviewer. Reverting this task and all subsequent task commits."
+    # Deterministic revert order: newest -> oldest across remaining optimistic commits
+    rejected_index = index_of(entry in OPTIMISTIC_COMMITS)
+    for undo_entry in reverse(OPTIMISTIC_COMMITS[rejected_index:]):
+      git revert --no-edit ${undo_entry.commit_hash}
+    # Read feedback: status.verdict_reason
+    # Optionally accept/apply pending counter-patch for rejected review
+    # Incorporate feedback, re-execute from this task onward
+    # Switch to blocking mode for the remainder of this plan
+    break
+  elif status.status == "pending":
+    # Not yet reviewed — wait with long-poll
+    Loop:
+      status = mcp__gsdreview__get_review_status(review_id=entry.review_id, wait=true)
+      if status.status in ("approved", "changes_requested"):
+        break
+    # Then handle as above
+```
+
+**Limitation (v1):** If an early task is rejected, ALL subsequent task commits for this plan are reverted. The executor must re-execute from the rejected task onward in blocking mode. Document this in SUMMARY.md under "Optimistic Mode Reverts" if it occurs.
+
+**Error handling:** If broker is unreachable during the end-of-plan review check, warn user and proceed (changes are already committed).
+</tandem_optimistic_mode>
+
+<tandem_plan_review_gate>
+## Tandem Plan-Level Review Gate (Per-Plan Granularity)
+
+**When:** `TANDEM_ENABLED=true` AND `REVIEW_GRANULARITY=per_plan`
+**Skip if:** `TANDEM_ENABLED=false` OR `REVIEW_GRANULARITY=per_task`
+
+In per-plan mode, individual tasks are committed normally without review gates. A single review proposal is submitted after all tasks complete, covering the entire plan's changes.
+
+If `EXECUTION_MODE=optimistic` while `REVIEW_GRANULARITY=per_plan`, log a warning and force blocking per-plan behavior for v1 (single post-plan review with wait=true).
+
+**Flow:**
+
+1. Execute all tasks normally — each task goes through task_commit_protocol (commit individually, no tandem gate)
+2. After all tasks complete, generate combined diff:
+   ```bash
+   COMBINED_DIFF=$(git diff ${PLAN_START_REF}..HEAD)
+   ```
+   Where `PLAN_START_REF` was recorded in `<tandem_config>` before the first task.
+3. Build combined description: Include all task descriptions from PLAN.md, concatenated with headers.
+4. Submit single proposal:
+   Call `mcp__gsdreview__create_review` with:
+   - `intent`: "Plan {phase}-{plan}: {plan objective} ({N} tasks)"
+   - `agent_type`: "gsd-executor"
+   - `agent_role`: "proposer"
+   - `phase`: the phase number
+   - `plan`: the plan number
+   - `category`: "code_change"
+   - `description`: Combined task descriptions and verification results
+   - `diff`: COMBINED_DIFF
+5. Wait for verdict (long-poll):
+   Loop:
+     Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+     - **approved**: Close review, proceed to summary_creation
+     - **changes_requested**: Read feedback. If rejection applies to the entire plan:
+       - Revert all task commits: `git revert --no-edit ${PLAN_START_REF}..HEAD`
+       - Incorporate feedback
+       - Re-execute all tasks
+       - Resubmit combined diff
+       - Return to polling
+
+**Important:** Per-plan mode still commits each task individually (for git history traceability). The review gate simply moves from per-task to post-all-tasks. On rejection, all task commits for the plan are reverted.
+
+**v1 limitation:** Per-plan optimistic is normalized to per-plan blocking to keep behavior deterministic.
+</tandem_plan_review_gate>
+
+<tandem_error_handling>
+## Broker Connection Error Handling
+
+If any `mcp__gsdreview__*` call fails with a connection error (the very first call in a session):
+
+1. Log warning: "Review broker unreachable. Falling back to solo mode for this session."
+2. Set `TANDEM_ENABLED=false` for the remainder of this executor's execution
+3. Proceed with normal (non-tandem) workflow — standard task_commit_protocol without review gates
+4. Do NOT retry broker calls — the broker is likely not running
+
+This ensures workflow never blocks on a missing broker. The user sees the warning and can start the broker for next execution.
+</tandem_error_handling>
+
 <summary_creation>
 After all tasks complete, create `{phase}-{plan}-SUMMARY.md` at `.planning/phases/XX-name/`.
 
