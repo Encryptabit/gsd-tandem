@@ -8,6 +8,7 @@ from contextlib import suppress
 
 from fastmcp import Context
 
+from gsd_review_broker.audit import record_event
 from gsd_review_broker.db import AppContext
 from gsd_review_broker.diff_utils import extract_affected_files, validate_diff
 from gsd_review_broker.models import ReviewStatus
@@ -107,6 +108,13 @@ async def create_review(
                         review_id,
                     ),
                 )
+                await record_event(
+                    app.db, review_id, "review_revised",
+                    actor=agent_type,
+                    old_status="changes_requested",
+                    new_status="pending",
+                    metadata={"revised": True},
+                )
                 await app.db.execute("COMMIT")
             except Exception as exc:
                 await _rollback_quietly(app)
@@ -141,6 +149,12 @@ async def create_review(
                     str(priority),
                     category,
                 ),
+            )
+            await record_event(
+                app.db, new_review_id, "review_created",
+                actor=agent_type,
+                new_status="pending",
+                metadata={"intent": intent, "category": category},
             )
             await app.db.execute("COMMIT")
         except Exception as exc:
@@ -259,6 +273,13 @@ async def claim_review(
                             review_id,
                         ),
                     )
+                    await record_event(
+                        app.db, review_id, "review_auto_rejected",
+                        actor="broker-validator",
+                        old_status="pending",
+                        new_status="changes_requested",
+                        metadata={"reason": error_detail},
+                    )
                     await app.db.execute("COMMIT")
                     auto_rejected_result = {
                         "review_id": review_id,
@@ -274,6 +295,12 @@ async def claim_review(
                     """UPDATE reviews SET status = ?, claimed_by = ?, updated_at = datetime('now')
                        WHERE id = ?""",
                     (ReviewStatus.CLAIMED, reviewer_id, review_id),
+                )
+                await record_event(
+                    app.db, review_id, "review_claimed",
+                    actor=reviewer_id,
+                    old_status="pending",
+                    new_status="claimed",
                 )
                 await app.db.execute("COMMIT")
         except Exception as exc:
@@ -383,6 +410,13 @@ async def submit_verdict(
                            WHERE id = ?""",
                         (normalized_reason, review_id),
                     )
+                await record_event(
+                    app.db, review_id, "verdict_comment",
+                    actor="reviewer",
+                    old_status=str(current_status),
+                    new_status=str(current_status),
+                    metadata={"reason": normalized_reason, "has_counter_patch": counter_patch is not None},
+                )
                 await app.db.execute("COMMIT")
             except Exception as exc:
                 await _rollback_quietly(app)
@@ -441,6 +475,13 @@ async def submit_verdict(
                        WHERE id = ?""",
                     (target_status, normalized_reason, review_id),
                 )
+            await record_event(
+                app.db, review_id, "verdict_submitted",
+                actor="reviewer",
+                old_status=str(current_status),
+                new_status=str(target_status),
+                metadata={"verdict": verdict, "has_counter_patch": counter_patch is not None},
+            )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
@@ -481,6 +522,12 @@ async def close_review(
                 """UPDATE reviews SET status = ?, updated_at = datetime('now')
                    WHERE id = ?""",
                 (ReviewStatus.CLOSED, review_id),
+            )
+            await record_event(
+                app.db, review_id, "review_closed",
+                actor="system",
+                old_status=str(current_status),
+                new_status="closed",
             )
             await app.db.execute("COMMIT")
         except Exception as exc:
@@ -542,6 +589,7 @@ async def accept_counter_patch(
                    WHERE id = ?""",
                 (review_id,),
             )
+            await record_event(app.db, review_id, "counter_patch_accepted", actor="proposer")
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
@@ -585,6 +633,7 @@ async def reject_counter_patch(
                    WHERE id = ?""",
                 (review_id,),
             )
+            await record_event(app.db, review_id, "counter_patch_rejected", actor="proposer")
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
@@ -763,6 +812,11 @@ async def add_message(
                    ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (msg_id, review_id, sender_role, current_round, body, metadata),
             )
+            await record_event(
+                app.db, review_id, "message_sent",
+                actor=sender_role,
+                metadata={"round": current_round, "body_preview": body[:100]},
+            )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
@@ -828,3 +882,309 @@ async def get_discussion(
         })
 
     return {"review_id": review_id, "messages": messages, "count": len(messages)}
+
+
+@mcp.tool
+async def get_activity_feed(
+    status: str | None = None,
+    category: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Get a live activity feed of all reviews with message previews.
+
+    Returns all reviews sorted by most recently updated. Each entry includes
+    a truncated preview of the most recent message, total message count,
+    and the timestamp of the last message.
+
+    Optionally filter by status and/or category.
+    """
+    app: AppContext = ctx.lifespan_context
+    conditions: list[str] = []
+    params: list[str] = []
+    if status is not None:
+        conditions.append("r.status = ?")
+        params.append(status)
+    if category is not None:
+        conditions.append("r.category = ?")
+        params.append(category)
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    cursor = await app.db.execute(
+        f"""SELECT
+            r.id, r.status, r.intent, r.agent_type, r.phase, r.plan, r.task,
+            r.priority, r.category, r.claimed_by, r.verdict_reason,
+            strftime('%Y-%m-%dT%H:%M:%fZ', r.created_at) AS created_at,
+            strftime('%Y-%m-%dT%H:%M:%fZ', r.updated_at) AS updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.review_id = r.id) AS message_count,
+            (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MAX(m.created_at))
+             FROM messages m WHERE m.review_id = r.id) AS last_message_at,
+            (SELECT SUBSTR(m2.body, 1, 120)
+             FROM messages m2 WHERE m2.review_id = r.id
+             ORDER BY m2.rowid DESC LIMIT 1) AS last_message_preview
+        FROM reviews r
+        {where_clause}
+        ORDER BY r.updated_at DESC, r.id DESC""",
+        params,
+    )
+    rows = await cursor.fetchall()
+    reviews = [
+        {
+            "id": row["id"],
+            "status": row["status"],
+            "intent": row["intent"],
+            "agent_type": row["agent_type"],
+            "phase": row["phase"],
+            "plan": row["plan"],
+            "task": row["task"],
+            "priority": row["priority"],
+            "category": row["category"],
+            "claimed_by": row["claimed_by"],
+            "verdict_reason": row["verdict_reason"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "message_count": row["message_count"],
+            "last_message_at": row["last_message_at"],
+            "last_message_preview": row["last_message_preview"],
+        }
+        for row in rows
+    ]
+    return {"reviews": reviews, "count": len(reviews)}
+
+
+@mcp.tool
+async def get_audit_log(
+    review_id: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Get the append-only audit event history.
+
+    If review_id is provided, returns events for that review only.
+    If omitted, returns ALL events across all reviews.
+    Events are ordered by insertion order (ascending).
+    """
+    app: AppContext = ctx.lifespan_context
+
+    if review_id is not None:
+        # Verify review exists
+        cursor = await app.db.execute(
+            "SELECT id FROM reviews WHERE id = ?", (review_id,)
+        )
+        if await cursor.fetchone() is None:
+            return {"error": f"Review not found: {review_id}"}
+
+        cursor = await app.db.execute(
+            """SELECT id, review_id, event_type, actor, old_status, new_status,
+                      metadata, strftime('%Y-%m-%dT%H:%M:%fZ', created_at) AS created_at
+               FROM audit_events
+               WHERE review_id = ?
+               ORDER BY id ASC""",
+            (review_id,),
+        )
+    else:
+        cursor = await app.db.execute(
+            """SELECT id, review_id, event_type, actor, old_status, new_status,
+                      metadata, strftime('%Y-%m-%dT%H:%M:%fZ', created_at) AS created_at
+               FROM audit_events
+               ORDER BY id ASC"""
+        )
+
+    rows = await cursor.fetchall()
+    events = []
+    for row in rows:
+        parsed_metadata = None
+        if row["metadata"] is not None:
+            try:
+                parsed_metadata = json.loads(row["metadata"])
+            except (json.JSONDecodeError, TypeError):
+                parsed_metadata = row["metadata"]
+        events.append({
+            "id": row["id"],
+            "review_id": row["review_id"],
+            "event_type": row["event_type"],
+            "actor": row["actor"],
+            "old_status": row["old_status"],
+            "new_status": row["new_status"],
+            "metadata": parsed_metadata,
+            "created_at": row["created_at"],
+        })
+
+    result: dict = {"events": events, "count": len(events)}
+    if review_id is not None:
+        result["review_id"] = review_id
+    return result
+
+
+@mcp.tool
+async def get_review_stats(ctx: Context = None) -> dict:
+    """Get workflow health statistics for the broker.
+
+    Returns total reviews, approval/rejection rates, reviews by category,
+    average time-to-verdict, average review duration, and average time
+    in each state.
+    """
+    app: AppContext = ctx.lifespan_context
+
+    # Query 1: Status counts
+    cursor = await app.db.execute("""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN status = 'changes_requested' THEN 1 ELSE 0 END) AS changes_requested,
+            SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed
+        FROM reviews
+    """)
+    counts = dict(await cursor.fetchone())
+
+    # Query 2: Category breakdown
+    cursor = await app.db.execute("""
+        SELECT COALESCE(category, 'uncategorized') AS cat, COUNT(*) AS cnt
+        FROM reviews GROUP BY cat
+    """)
+    by_category = {row["cat"]: row["cnt"] for row in await cursor.fetchall()}
+
+    # Query 3: Approval rate
+    approval_rate = None
+    cursor = await app.db.execute("""
+        SELECT COUNT(DISTINCT review_id) FROM audit_events
+        WHERE event_type = 'verdict_submitted'
+        AND json_extract(metadata, '$.verdict') = 'approved'
+    """)
+    approved_verdicts = (await cursor.fetchone())[0]
+    cursor = await app.db.execute("""
+        SELECT COUNT(DISTINCT review_id) FROM audit_events
+        WHERE event_type = 'verdict_submitted'
+    """)
+    total_verdicts = (await cursor.fetchone())[0]
+    if total_verdicts > 0:
+        approval_rate = round(100.0 * approved_verdicts / total_verdicts, 1)
+
+    # Query 4: Average time-to-verdict (seconds)
+    cursor = await app.db.execute("""
+        SELECT AVG(
+            (julianday(ae.created_at) - julianday(r.created_at)) * 86400
+        ) AS avg_seconds
+        FROM reviews r
+        JOIN audit_events ae ON ae.review_id = r.id
+            AND ae.event_type = 'verdict_submitted'
+        WHERE ae.id = (
+            SELECT MIN(ae2.id) FROM audit_events ae2
+            WHERE ae2.review_id = r.id AND ae2.event_type = 'verdict_submitted'
+        )
+    """)
+    avg_to_verdict = (await cursor.fetchone())[0]
+
+    # Query 5: Average review duration (created to closed, seconds)
+    cursor = await app.db.execute("""
+        SELECT AVG(
+            (julianday(ae.created_at) - julianday(r.created_at)) * 86400
+        ) AS avg_seconds
+        FROM reviews r
+        JOIN audit_events ae ON ae.review_id = r.id
+            AND ae.event_type = 'review_closed'
+    """)
+    avg_duration = (await cursor.fetchone())[0]
+
+    # Query 6: Average time in each state (seconds)
+    cursor = await app.db.execute("""
+        SELECT
+            new_status,
+            AVG(duration_seconds) AS avg_seconds
+        FROM (
+            SELECT
+                ae.new_status,
+                (julianday(LEAD(ae.created_at) OVER (
+                    PARTITION BY ae.review_id ORDER BY ae.id
+                )) - julianday(ae.created_at)) * 86400 AS duration_seconds
+            FROM audit_events ae
+            WHERE ae.new_status IS NOT NULL
+        )
+        WHERE duration_seconds IS NOT NULL
+        GROUP BY new_status
+    """)
+    avg_time_in_state: dict = {}
+    for row in await cursor.fetchall():
+        avg_time_in_state[row["new_status"]] = round(row["avg_seconds"], 1)
+
+    # Fill in default keys for expected states
+    for state_key in ("pending", "claimed", "approved", "changes_requested"):
+        if state_key not in avg_time_in_state:
+            avg_time_in_state[state_key] = None
+
+    return {
+        "total_reviews": counts["total"],
+        "by_status": {
+            "pending": counts["pending"],
+            "claimed": counts["claimed"],
+            "approved": counts["approved"],
+            "changes_requested": counts["changes_requested"],
+            "closed": counts["closed"],
+        },
+        "by_category": by_category,
+        "approval_rate_pct": approval_rate,
+        "avg_time_to_verdict_seconds": round(avg_to_verdict, 1) if avg_to_verdict else None,
+        "avg_review_duration_seconds": round(avg_duration, 1) if avg_duration else None,
+        "avg_time_in_state_seconds": avg_time_in_state,
+    }
+
+
+@mcp.tool
+async def get_review_timeline(
+    review_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Get the complete chronological timeline for a single review.
+
+    Returns all audit events in order: creation, claims, messages,
+    verdicts, counter-patches, and closure. Each event includes
+    its type, actor, status change, and timestamp.
+    """
+    app: AppContext = ctx.lifespan_context
+
+    # Verify review exists
+    cursor = await app.db.execute(
+        "SELECT id, intent, status, category FROM reviews WHERE id = ?",
+        (review_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return {"error": f"Review not found: {review_id}"}
+
+    cursor = await app.db.execute(
+        """SELECT event_type, actor, old_status, new_status, metadata,
+                  strftime('%Y-%m-%dT%H:%M:%fZ', created_at) AS timestamp
+           FROM audit_events
+           WHERE review_id = ?
+           ORDER BY id ASC""",
+        (review_id,),
+    )
+    events = []
+    for event_row in await cursor.fetchall():
+        event: dict = {
+            "event_type": event_row["event_type"],
+            "actor": event_row["actor"],
+            "timestamp": event_row["timestamp"],
+        }
+        if event_row["old_status"] is not None:
+            event["old_status"] = event_row["old_status"]
+        if event_row["new_status"] is not None:
+            event["new_status"] = event_row["new_status"]
+        if event_row["metadata"] is not None:
+            try:
+                event["metadata"] = json.loads(event_row["metadata"])
+            except (json.JSONDecodeError, TypeError):
+                event["metadata"] = event_row["metadata"]
+        events.append(event)
+
+    return {
+        "review_id": review_id,
+        "intent": row["intent"],
+        "current_status": row["status"],
+        "category": row["category"],
+        "events": events,
+        "event_count": len(events),
+    }
