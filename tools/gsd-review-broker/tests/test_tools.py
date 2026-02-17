@@ -212,6 +212,70 @@ class TestSubmitVerdict:
         assert "error" in result
         assert "not found" in result["error"]
 
+    async def test_submit_verdict_comment_records_feedback(self, ctx: MockContext) -> None:
+        """Comment verdict records feedback without changing review status."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"],
+            verdict="comment",
+            reason="Consider using a dataclass here",
+            ctx=ctx,
+        )
+        assert result["verdict"] == "comment"
+        assert result["status"] == "claimed"
+        assert result["verdict_reason"] == "Consider using a dataclass here"
+        # Verify status is still claimed in DB
+        cursor = await ctx.lifespan_context.db.execute(
+            "SELECT status, verdict_reason FROM reviews WHERE id = ?",
+            (created["review_id"],),
+        )
+        row = await cursor.fetchone()
+        assert row["status"] == "claimed"
+        assert row["verdict_reason"] == "Consider using a dataclass here"
+
+    async def test_submit_verdict_comment_requires_notes(self, ctx: MockContext) -> None:
+        """Comment verdict without reason returns error."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"], verdict="comment", ctx=ctx
+        )
+        assert "error" in result
+        assert "comment" in result["error"].lower()
+
+    async def test_submit_verdict_changes_requested_requires_notes(
+        self, ctx: MockContext
+    ) -> None:
+        """changes_requested verdict without reason returns error."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"], verdict="changes_requested", ctx=ctx
+        )
+        assert "error" in result
+        assert "changes_requested" in result["error"]
+
+    async def test_submit_verdict_approved_without_notes_succeeds(
+        self, ctx: MockContext
+    ) -> None:
+        """Approved verdict without reason succeeds (notes optional)."""
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        result = await submit_verdict.fn(
+            review_id=created["review_id"], verdict="approved", ctx=ctx
+        )
+        assert result["status"] == "approved"
+        assert result["verdict_reason"] is None
+
 
 # ---- close_review tests ----
 
