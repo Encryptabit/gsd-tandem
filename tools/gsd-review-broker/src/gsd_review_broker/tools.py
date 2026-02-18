@@ -145,6 +145,7 @@ async def create_review(
                            counter_patch = NULL,
                            counter_patch_affected_files = NULL,
                            counter_patch_status = NULL,
+                           skip_diff_validation = ?,
                            updated_at = datetime('now')
                        WHERE id = ?""",
                     (
@@ -153,6 +154,7 @@ async def create_review(
                         description,
                         diff,
                         affected_files,
+                        1 if skip_diff_validation else 0,
                         review_id,
                     ),
                 )

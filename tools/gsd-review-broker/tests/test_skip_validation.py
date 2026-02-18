@@ -260,3 +260,107 @@ class TestRevisionWithSkipValidation:
         assert "error" not in result
         assert result["revised"] is True
         mock_vd.assert_not_called()
+
+    async def test_claim_after_revision_respects_updated_flag_true(self, ctx) -> None:
+        """Claim after revision with skip=True skips validate_diff."""
+        # Create with skip=False -> claim -> reject -> revise with skip=True -> claim
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            create_result = await create_review.fn(
+                intent="original",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="6",
+                diff=SAMPLE_DIFF,
+                skip_diff_validation=False,
+                ctx=ctx,
+            )
+        review_id = create_result["review_id"]
+
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            await claim_review.fn(review_id=review_id, reviewer_id="r1", ctx=ctx)
+
+        await submit_verdict.fn(
+            review_id=review_id, verdict="changes_requested", reason="needs work", ctx=ctx
+        )
+
+        # Revise with skip=True
+        with patch("gsd_review_broker.tools.validate_diff", new_callable=AsyncMock):
+            await create_review.fn(
+                review_id=review_id,
+                intent="revised",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="6",
+                diff=SAMPLE_DIFF,
+                skip_diff_validation=True,
+                ctx=ctx,
+            )
+
+        # Claim should NOT call validate_diff (flag updated to True on revision)
+        with patch("gsd_review_broker.tools.validate_diff", new_callable=AsyncMock) as mock_vd:
+            result = await claim_review.fn(
+                review_id=review_id, reviewer_id="r2", ctx=ctx
+            )
+        assert "error" not in result
+        assert result["status"] == "claimed"
+        mock_vd.assert_not_called()
+
+    async def test_claim_after_revision_respects_updated_flag_false(self, ctx) -> None:
+        """Claim after revision with skip=False calls validate_diff even if original had skip=True."""
+        # Create with skip=True -> claim -> reject -> revise with skip=False -> claim
+        with patch("gsd_review_broker.tools.validate_diff", new_callable=AsyncMock):
+            create_result = await create_review.fn(
+                intent="original",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="6",
+                diff=SAMPLE_DIFF,
+                skip_diff_validation=True,
+                ctx=ctx,
+            )
+        review_id = create_result["review_id"]
+
+        with patch("gsd_review_broker.tools.validate_diff", new_callable=AsyncMock):
+            await claim_review.fn(review_id=review_id, reviewer_id="r1", ctx=ctx)
+
+        await submit_verdict.fn(
+            review_id=review_id, verdict="changes_requested", reason="needs work", ctx=ctx
+        )
+
+        # Revise with skip=False
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ):
+            await create_review.fn(
+                review_id=review_id,
+                intent="revised",
+                agent_type="gsd-executor",
+                agent_role="proposer",
+                phase="6",
+                diff=SAMPLE_DIFF,
+                skip_diff_validation=False,
+                ctx=ctx,
+            )
+
+        # Claim SHOULD call validate_diff (flag updated to False on revision)
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ) as mock_vd:
+            result = await claim_review.fn(
+                review_id=review_id, reviewer_id="r2", ctx=ctx
+            )
+        assert "error" not in result
+        assert result["status"] == "claimed"
+        mock_vd.assert_called_once()
