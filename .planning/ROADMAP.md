@@ -16,8 +16,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
 - [x] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
 - [x] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
-- [ ] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
-- [ ] **Phase 6: Review Gate Enforcement** - Make broker a proper gate: skip_diff_validation for post-commit diffs, orchestrator-mediated review, executor simplification
+- [x] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
+- [x] **Phase 6: Review Gate Enforcement** - Make broker a proper gate: skip_diff_validation for post-commit diffs, orchestrator-mediated review, executor simplification
+- [ ] **Phase 7: Add Reviewer Lifecycle Management to Broker** - Broker-internal subprocess spawning, auto-scaling pool, fenced reclaim, lifecycle audit
 
 ## Phase Details
 
@@ -97,8 +98,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md -- Audit infrastructure, observability tools (activity feed, audit log, stats, timeline), audit wiring
-- [ ] 05-02-PLAN.md -- Observability tool tests and end-to-end workflow validation
+- [x] 05-01-PLAN.md -- Audit infrastructure, observability tools (activity feed, audit log, stats, timeline), audit wiring
+- [x] 05-02-PLAN.md -- Observability tool tests and end-to-end workflow validation
 
 ### Phase 6: Review Gate Enforcement
 **Goal**: All code changes flow through the broker as a proper gate, with the orchestrator mediating review on behalf of subagents
@@ -112,12 +113,33 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 06-01-PLAN.md -- skip_diff_validation flag, executor simplification, orchestrator review gate, CLAUDE.md rule
+- [x] 06-01-PLAN.md -- skip_diff_validation flag, executor simplification, orchestrator review gate, CLAUDE.md rule
+
+### Phase 7: Add Reviewer Lifecycle Management to Broker
+**Goal:** Broker spawns, scales, drains, and terminates Codex reviewer subprocesses internally with fenced reclaim, replacing external manual launcher scripts
+**Depends on:** Phase 6
+**Requirements:** RLMC-01, RLMC-02, RLMC-03, RLMC-04, RLMC-05, RLMC-06, RLMC-07, RLMC-08
+**Success Criteria** (what must be TRUE):
+  1. Broker spawns Codex reviewer subprocesses using shell-free argv-list (WSL on Windows, native on Linux/macOS)
+  2. Pool auto-scales based on pending:reviewer ratio, scales to zero when idle, cold-starts on first review
+  3. Fenced reclaim prevents stale verdicts: claim_generation fence token rejects late submissions after timeout
+  4. Graceful drain on TTL/idle timeout: finish current review, then terminate
+  5. Per-reviewer stats tracked (reviews completed, average time, approval rate)
+  6. Full lifecycle audit trail (spawn, drain, terminate, reclaim events)
+  7. Manual override MCP tools (spawn_reviewer, kill_reviewer) available alongside auto-scaling
+  8. Stale session recovery on broker restart: reclaim claimed reviews from dead sessions
+**Plans**: 4 plans
+
+Plans:
+- [ ] 07-01-PLAN.md -- Schema foundation: reviewers table, fence token columns, state machine update, config validation, prompt template
+- [ ] 07-02-PLAN.md -- ReviewerPool class with subprocess spawning, platform-aware argv builder, drain/terminate lifecycle
+- [ ] 07-03-PLAN.md -- Fenced reclaim: claim_generation fence tokens, claimed_at timestamps, stale verdict rejection
+- [ ] 07-04-PLAN.md -- Auto-scaling, background tasks, MCP tools (spawn/kill/list), lifespan integration, stale session recovery
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -125,5 +147,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
 | 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
 | 4. GSD Workflow Integration | 3/3 | Complete | 2026-02-17 |
-| 5. Observability and Validation | 0/2 | Not started | - |
-| 6. Review Gate Enforcement | 0/1 | Not started | - |
+| 5. Observability and Validation | 2/2 | Complete | 2026-02-18 |
+| 6. Review Gate Enforcement | 1/1 | Complete | 2026-02-18 |
+| 7. Reviewer Lifecycle Management | 0/4 | Planned | - |
