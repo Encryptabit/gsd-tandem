@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 5 in progress -- observability and validation
+**Current focus:** Phase 6 complete -- review gate enforcement
 
 ## Current Position
 
-Phase: 5 of 5 (Observability and Validation)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-02-17 -- Completed 05-01-PLAN.md
+Phase: 6 of 6 (Review Gate Enforcement)
+Plan: 1 of 1 in current phase
+Status: Complete
+Last activity: 2026-02-18 -- Completed 06-01-PLAN.md
 
-Progress: [##########░] 92% (11/12 plans)
+Progress: [############] 100% (13/13 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: ~5.6 minutes
-- Total execution time: ~62 minutes
+- Total plans completed: 12
+- Average duration: ~5.9 minutes
+- Total execution time: ~71 minutes
 
 **By Phase:**
 
@@ -32,10 +32,11 @@ Progress: [##########░] 92% (11/12 plans)
 | 3. Discussion and Patches | 2/2 | ~13 min | ~6.5 min |
 | 4. GSD Workflow Integration | 3/3 | ~11 min | ~3.7 min |
 | 5. Observability and Validation | 1/2 | ~6 min | ~6 min |
+| 6. Review Gate Enforcement | 1/1 | ~9 min | ~9 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-01 (~3 min), 04-02 (~4 min), 04-03 (~4 min), 05-01 (~6 min)
-- Trend: Stable (05-01 slightly longer due to large tools.py modifications)
+- Last 5 plans: 04-02 (~4 min), 04-03 (~4 min), 05-01 (~6 min), 06-01 (~9 min)
+- Trend: Slight increase (06-01 longer due to cross-cutting changes across broker, executor, and workflow)
 
 *Updated after each plan completion*
 
@@ -69,6 +70,10 @@ Recent decisions affecting current work:
 - [05-01]: Approval rate from audit_events verdict_submitted events via json_extract
 - [05-01]: Average time-in-state uses LEAD() window function over consecutive audit events
 - [05-01]: ISO 8601 timestamps only on new tool output; existing tools unchanged
+- [06-01]: Orchestrator-mediated review: only execute-phase workflow interacts with broker, executor subagents focus on execution
+- [06-01]: skip_diff_validation persisted as INTEGER column on reviews table, respected by both create_review and claim_review
+- [06-01]: Wave parallelism forced off when tandem_enabled=true to ensure clean per-plan diffs
+- [06-01]: CLAUDE.md removed from .gitignore so tandem review rule is version-controlled
 
 ### Pending Todos
 
@@ -81,6 +86,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-17T22:14:56Z
-Stopped at: Completed 05-01-PLAN.md (audit infrastructure + observability tools)
+Last session: 2026-02-18T06:48:00Z
+Stopped at: Completed 06-01-PLAN.md (review gate enforcement)
 Resume file: None
