@@ -79,6 +79,10 @@ Recent decisions affecting current work:
 
 - Future Goal: Add a master-reviewer orchestration layer for reviewer pools. Master reviewer is the single verdict authority, tracks file/symbol ownership across active reviews, reconciles overlap/conflicts from sub-reviewers, and delegates non-overlapping review packets back to sub-reviewers.
 
+### Roadmap Evolution
+
+- Phase 7 added: Add Reviewer Lifecycle Management to Broker
+
 ### Blockers/Concerns
 
 - Research Gap 3: Codex MCP client capabilities unverified -- test early in Phase 1
@@ -86,6 +90,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-18T06:48:00Z
-Stopped at: Completed 06-01-PLAN.md (review gate enforcement)
-Resume file: None
+Last session: 2026-02-18T14:10:00Z
+Stopped at: Phase 7 context gathered
+Resume file: .planning/phases/07-add-reviewer-lifecycle-management-to-broker/07-CONTEXT.md
