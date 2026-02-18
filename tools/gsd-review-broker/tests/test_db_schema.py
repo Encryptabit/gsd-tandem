@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import aiosqlite
 import pytest
 
@@ -87,3 +89,93 @@ class TestSchemaMigration:
             await ensure_schema(conn)
 
         await conn.close()
+
+
+def _winerror_10054_connection_reset() -> ConnectionResetError:
+    exc = ConnectionResetError(10054, "An existing connection was forcibly closed")
+    exc.winerror = 10054  # type: ignore[attr-defined]
+    return exc
+
+
+def test_is_windows_proactor_reset_noise_detects_known_callback() -> None:
+    context = {
+        "message": (
+            "Exception in callback _ProactorBasePipeTransport._call_connection_lost()"
+        ),
+        "exception": _winerror_10054_connection_reset(),
+    }
+    assert db_module._is_windows_proactor_reset_noise(context) is True
+
+
+def test_is_windows_proactor_reset_noise_ignores_nonmatching_context() -> None:
+    nonmatching_message = {
+        "message": "Exception in callback another_handler()",
+        "exception": _winerror_10054_connection_reset(),
+    }
+    assert db_module._is_windows_proactor_reset_noise(nonmatching_message) is False
+
+    wrong_error = {
+        "message": (
+            "Exception in callback _ProactorBasePipeTransport._call_connection_lost()"
+        ),
+        "exception": RuntimeError("unexpected"),
+    }
+    assert db_module._is_windows_proactor_reset_noise(wrong_error) is False
+
+
+async def test_install_windows_proactor_noise_filter_suppresses_only_known_noise(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(db_module.os, "name", "nt")
+    loop = asyncio.get_running_loop()
+    original = loop.get_exception_handler()
+    forwarded_contexts: list[dict[str, object]] = []
+
+    def previous_handler(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        forwarded_contexts.append(context)
+
+    loop.set_exception_handler(previous_handler)
+    restore = db_module.install_windows_proactor_noise_filter(loop)
+    installed_handler = loop.get_exception_handler()
+    assert installed_handler is not None
+    assert installed_handler is not previous_handler
+
+    try:
+        suppressed_context = {
+            "message": (
+                "Exception in callback _ProactorBasePipeTransport._call_connection_lost()"
+            ),
+            "exception": _winerror_10054_connection_reset(),
+        }
+        installed_handler(loop, suppressed_context)
+        assert forwarded_contexts == []
+
+        forwarded_context = {
+            "message": "Exception in callback something_else()",
+            "exception": RuntimeError("boom"),
+        }
+        installed_handler(loop, forwarded_context)
+        assert forwarded_contexts == [forwarded_context]
+    finally:
+        restore()
+        loop.set_exception_handler(original)
+
+
+async def test_install_windows_proactor_noise_filter_is_noop_on_non_windows(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(db_module.os, "name", "posix")
+    loop = asyncio.get_running_loop()
+    original = loop.get_exception_handler()
+
+    def previous_handler(_loop: asyncio.AbstractEventLoop, _context: dict[str, object]) -> None:
+        return
+
+    loop.set_exception_handler(previous_handler)
+    restore = db_module.install_windows_proactor_noise_filter(loop)
+    try:
+        assert loop.get_exception_handler() is previous_handler
+        restore()
+        assert loop.get_exception_handler() is previous_handler
+    finally:
+        loop.set_exception_handler(original)
