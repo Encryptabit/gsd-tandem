@@ -139,6 +139,14 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
        - [ ] SUMMARY.md created in plan directory
        - [ ] STATE.md updated with position and decisions
        </success_criteria>
+
+       <completion_contract>
+       Return git handoff metadata for orchestrator review:
+       - `Plan Ref Range: <start_ref>..<end_ref>`
+       - `Plan Diff File: .planning/tmp/<generated>.patch` (full unified diff artifact)
+       - `Changed Files (<start_ref>..<end_ref>):` list
+       This lets orchestrator reconstruct exact plan diffs when broker feedback requests patch-level fixes.
+       </completion_contract>
      "
    )
    ```
@@ -148,6 +156,11 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 3a. **Per-plan review gate** (only when `TANDEM_ENABLED=true`):
 
    For each completed plan in the wave (sequentially, since parallelism is forced off):
+
+   Resolve project scope once for the wave:
+   ```bash
+   PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+   ```
 
    1. Record `PLAN_START_REF` before spawning the plan's executor (add this before step 2).
       ```bash
@@ -166,6 +179,7 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
         agent_role="proposer",
         phase="{phase_number}",
         plan="{plan_number}",
+        project=PROJECT_SCOPE,
         category="code_change",
         diff=PLAN_DIFF,
         skip_diff_validation=true
@@ -176,13 +190,27 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
       Loop:
         status = mcp__gsdreview__get_review_status(review_id=ID, wait=true)
         - approved: mcp__gsdreview__close_review(review_id=ID), proceed
-        - changes_requested: Read verdict_reason, log feedback.
-          Hard-reset to clean state:
-            git reset --hard ${PLAN_START_REF}
-          This is safe because the work was rejected and the executor will
-          redo it from scratch with feedback.
-          Re-spawn executor with verdict_reason appended to its prompt.
-          Return to step 3a.2 for the re-executed plan.
+        - changes_requested:
+          1) Read verdict_reason.
+          2) Fetch full proposal:
+             PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)
+          3) If PROPOSAL.counter_patch_status == "pending" and counter_patch exists:
+             - Try apply reviewer patch directly:
+               TMP_PATCH=".planning/tmp/review-${ID}.patch"
+               mkdir -p .planning/tmp
+               printf '%s' "$PROPOSAL.counter_patch" > "$TMP_PATCH"
+               if git apply --check "$TMP_PATCH"; then
+                 git apply "$TMP_PATCH"
+                 mcp__gsdreview__accept_counter_patch(review_id=ID)
+               else
+                 mcp__gsdreview__reject_counter_patch(review_id=ID)
+               fi
+          4) If patch was not applicable or additional fixes are needed:
+             - Re-spawn executor with verdict_reason (+ counter_patch context if present).
+          5) Recompute PLAN_DIFF and resubmit with same review_id:
+             PLAN_DIFF=$(git diff ${PLAN_START_REF}..HEAD)
+             mcp__gsdreview__create_review(review_id=ID, intent=..., diff=PLAN_DIFF, ...)
+          6) Return to polling loop.
       ```
    6. On broker connection failure on first call: warn and set `TANDEM_ENABLED=false`
       for remainder of execution (solo mode fallback). Log:

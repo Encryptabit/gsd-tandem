@@ -102,7 +102,7 @@ class TestStatsStatusCounts:
     async def test_status_distribution(self, ctx: MockContext) -> None:
         """Each lifecycle stage is counted correctly."""
         r1 = await _create_review(ctx, intent="to claim")
-        r2 = await _create_review(ctx, intent="stays pending")
+        await _create_review(ctx, intent="stays pending")
 
         await claim_review.fn(review_id=r1["review_id"], reviewer_id="rev-1", ctx=ctx)
 
@@ -110,6 +110,19 @@ class TestStatsStatusCounts:
         assert result["by_status"]["pending"] == 1
         assert result["by_status"]["claimed"] == 1
         assert result["total_reviews"] == 2
+
+    async def test_status_distribution_scoped_by_project(self, ctx: MockContext) -> None:
+        """Project-scoped stats only include reviews for that project."""
+        r1 = await _create_review(ctx, intent="alpha claimed", project="alpha")
+        await _create_review(ctx, intent="alpha pending", project="alpha")
+        await _create_review(ctx, intent="beta pending", project="beta")
+
+        await claim_review.fn(review_id=r1["review_id"], reviewer_id="rev-1", ctx=ctx)
+
+        result = await get_review_stats.fn(project="alpha", ctx=ctx)
+        assert result["total_reviews"] == 2
+        assert result["by_status"]["pending"] == 1
+        assert result["by_status"]["claimed"] == 1
 
 
 # ---- TestStatsCategoryCounts ----
@@ -201,7 +214,7 @@ class TestStatsTimingMetrics:
 
 class TestStatsAvgTimeInState:
     async def test_avg_time_in_state_keys(self, ctx: MockContext) -> None:
-        """avg_time_in_state_seconds always has pending, claimed, approved, changes_requested keys."""
+        """avg_time_in_state_seconds always has expected state keys."""
         await _full_lifecycle(ctx, verdict="approved")
         result = await get_review_stats.fn(ctx=ctx)
         avg_tis = result["avg_time_in_state_seconds"]

@@ -206,6 +206,7 @@ class TestRevisionFlow:
             review_id=review_id,
             verdict="changes_requested",
             reason="Needs work",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
 
@@ -260,6 +261,7 @@ class TestRevisionFlow:
             review_id=review_id,
             verdict="changes_requested",
             reason="Needs work",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
 
@@ -477,6 +479,7 @@ class TestFullProposalLifecycle:
             review_id=review_id,
             verdict="approved",
             reason="LGTM",
+            reviewer_id="reviewer-agent",
             ctx=ctx,
         )
         assert verdict["status"] == "approved"
@@ -514,6 +517,7 @@ class TestFullProposalLifecycle:
             review_id=review_id,
             verdict="changes_requested",
             reason="Missing error handling",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
         assert rejected["status"] == "changes_requested"
@@ -563,6 +567,7 @@ class TestFullProposalLifecycle:
             review_id=review_id,
             verdict="approved",
             reason="Looks good now",
+            reviewer_id="reviewer-2",
             ctx=ctx,
         )
         assert approved["status"] == "approved"

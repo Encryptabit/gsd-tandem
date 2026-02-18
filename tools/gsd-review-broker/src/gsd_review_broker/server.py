@@ -48,6 +48,13 @@ def main() -> None:
 
     Set BROKER_HOST to override bind host.
     Default is 0.0.0.0 (all interfaces).
+
+    Storage:
+    - Default DB path is user-scoped config dir:
+      Linux: ~/.config/gsd-review-broker/codex_review_broker.sqlite3
+      macOS: ~/Library/Application Support/gsd-review-broker/codex_review_broker.sqlite3
+      Windows: %APPDATA%/gsd-review-broker/codex_review_broker.sqlite3
+    - Set BROKER_DB_PATH to override with an explicit SQLite file path.
     """
     _configure_logging()
     host = os.environ.get("BROKER_HOST", "0.0.0.0")

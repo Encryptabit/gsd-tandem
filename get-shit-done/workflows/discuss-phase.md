@@ -374,11 +374,17 @@ TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enable
 If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to write CONTEXT.md as normal.
 
 **Step 2: Submit context for review:**
+Resolve project scope for the review:
+```bash
+PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+```
+
 Call `mcp__gsdreview__create_review` with:
 - `intent`: "Phase {phase_number} context: {phase_name}"
 - `agent_type`: "gsd-discuss"
 - `agent_role`: "proposer"
 - `phase`: "{phase_number}"
+- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
 - `category`: "handoff"
 - `description`: The full CONTEXT.md content that was built (complete markdown)
 - `diff`: null (context is content, not diffs)
@@ -387,7 +393,12 @@ Call `mcp__gsdreview__create_review` with:
 Loop:
   Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
   - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write CONTEXT.md to disk.
-  - If `status == "changes_requested"`: Read `verdict_reason`, revise CONTEXT.md content accordingly, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_CONTEXT_MD_CONTENT, ...)`, then return to polling.
+  - If `status == "changes_requested"`:
+    1. Read `verdict_reason`
+    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists, merge those edits into revised CONTEXT content and call `mcp__gsdreview__accept_counter_patch(review_id=ID)`.
+    4. Resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_CONTEXT_MD_CONTENT, ...)`.
+    5. Return to polling.
 
 **Step 4: After approval, proceed to file write (existing behavior).**
 

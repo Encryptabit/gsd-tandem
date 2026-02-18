@@ -19,6 +19,14 @@ class ReviewStatus(StrEnum):
     CLOSED = "closed"
 
 
+class ReviewerStatus(StrEnum):
+    """Reviewer process lifecycle states for broker-managed reviewer pool."""
+
+    ACTIVE = "active"
+    DRAINING = "draining"
+    TERMINATED = "terminated"
+
+
 class Priority(StrEnum):
     """Review priority inferred from agent identity."""
 
@@ -57,6 +65,10 @@ class AuditEventType(StrEnum):
     COUNTER_PATCH_ACCEPTED = "counter_patch_accepted"
     COUNTER_PATCH_REJECTED = "counter_patch_rejected"
     MESSAGE_SENT = "message_sent"
+    REVIEWER_SPAWNED = "reviewer_spawned"
+    REVIEWER_DRAIN_START = "reviewer_drain_start"
+    REVIEWER_TERMINATED = "reviewer_terminated"
+    REVIEW_RECLAIMED = "review_reclaimed"
 
 
 class AgentIdentity(BaseModel):

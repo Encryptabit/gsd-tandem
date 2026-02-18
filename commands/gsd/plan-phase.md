@@ -17,9 +17,9 @@ allowed-tools:
 <objective>
 Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification.
 
-**Default flow:** Research (if needed) → Plan → Verify → Done
+**Default flow:** Research (if needed) → Plan → Verify → Tandem review gate (if enabled) → Done
 
-**Orchestrator role:** Parse arguments, validate phase, research domain (unless skipped), spawn gsd-planner, verify with gsd-plan-checker, iterate until pass or max iterations, present results.
+**Orchestrator role:** Parse arguments, validate phase, research domain (unless skipped), spawn gsd-planner, verify with gsd-plan-checker, run tandem plan review gate when enabled, iterate until pass or max iterations, present results.
 </objective>
 
 <execution_context>
@@ -41,5 +41,5 @@ Normalize phase input in step 2 before any directory lookups.
 
 <process>
 Execute the plan-phase workflow from @~/.claude/get-shit-done/workflows/plan-phase.md end-to-end.
-Preserve all workflow gates (validation, research, planning, verification loop, routing).
+Preserve all workflow gates (validation, research, planning, verification loop, tandem review gate, routing).
 </process>

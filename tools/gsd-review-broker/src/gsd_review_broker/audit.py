@@ -9,7 +9,7 @@ import aiosqlite
 
 async def record_event(
     db: aiosqlite.Connection,
-    review_id: str,
+    review_id: str | None,
     event_type: str,
     actor: str | None = None,
     old_status: str | None = None,

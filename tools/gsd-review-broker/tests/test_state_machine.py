@@ -23,6 +23,9 @@ class TestValidTransitions:
     def test_valid_transition_claimed_to_in_review(self) -> None:
         validate_transition(ReviewStatus.CLAIMED, ReviewStatus.IN_REVIEW)
 
+    def test_valid_transition_claimed_to_pending(self) -> None:
+        validate_transition(ReviewStatus.CLAIMED, ReviewStatus.PENDING)
+
     def test_valid_transition_in_review_to_approved(self) -> None:
         validate_transition(ReviewStatus.IN_REVIEW, ReviewStatus.APPROVED)
 

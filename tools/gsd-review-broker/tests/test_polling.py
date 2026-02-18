@@ -44,6 +44,7 @@ class TestGetReviewStatus:
             phase="1",
             plan="01-01",
             task="2",
+            project="alpha",
         )
         result = await get_review_status.fn(review_id=created["review_id"], ctx=ctx)
         assert result["id"] == created["review_id"]
@@ -54,6 +55,7 @@ class TestGetReviewStatus:
         assert result["phase"] == "1"
         assert result["plan"] == "01-01"
         assert result["task"] == "2"
+        assert result["project"] == "alpha"
         assert result["claimed_by"] is None
         assert result["verdict_reason"] is None
         assert result["updated_at"] is not None

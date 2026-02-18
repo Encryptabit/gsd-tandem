@@ -23,6 +23,17 @@
 - [x] **PROTO-07**: Broker runs `git apply --check` on proposal submission to detect conflicts before review begins
 - [x] **PROTO-08**: Reviews support priority levels (critical, normal, low) affecting reviewer queue ordering
 
+### Reviewer Lifecycle Management
+
+- [x] **RLMC-01**: Broker spawns Codex reviewer subprocesses with shell-free argv lists across Windows (WSL) and native platforms
+- [x] **RLMC-02**: Reviewer pool auto-scales using pending:reviewer ratio and reactive cold-start checks
+- [x] **RLMC-03**: Fenced reclaim prevents stale verdicts using claim_generation and reclaim transitions
+- [x] **RLMC-04**: Reviewer lifecycle supports drain/terminate/shutdown with subprocess + DB state consistency
+- [x] **RLMC-05**: Broker exposes manual override MCP tools for reviewer lifecycle control (spawn/kill/list)
+- [x] **RLMC-06**: Reviewer lifecycle schema exists (reviewers table, status model, lifecycle audit event types)
+- [x] **RLMC-07**: Reviewer pool configuration is validated with strict allowlists/range checks and backward-compatible disable behavior
+- [x] **RLMC-08**: Broker startup recovery reclaims stale claimed reviews via ownership sweep and session fencing
+
 ### Agent Interaction
 
 - [x] **INTER-01**: Every message and proposal includes full agent identity: agent_type, agent_role, phase, plan, task number
@@ -102,10 +113,18 @@
 | GSDI-05 | Phase 4 | Complete |
 | GSDI-06 | Phase 5 | Pending |
 | OBSV-01 | Phase 5 | Pending |
+| RLMC-01 | Phase 7 | Complete |
+| RLMC-02 | Phase 7 | Complete |
+| RLMC-03 | Phase 7 | Complete |
+| RLMC-04 | Phase 7 | Complete |
+| RLMC-05 | Phase 7 | Complete |
+| RLMC-06 | Phase 7 | Complete |
+| RLMC-07 | Phase 7 | Complete |
+| RLMC-08 | Phase 7 | Complete |
 
 **Coverage:**
-- v1 requirements: 25 total
-- Mapped to phases: 25
+- v1 requirements: 33 total
+- Mapped to phases: 33
 - Unmapped: 0
 
 ---

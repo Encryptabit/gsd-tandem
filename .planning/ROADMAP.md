@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
 - [x] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
 - [x] **Phase 6: Review Gate Enforcement** - Make broker a proper gate: skip_diff_validation for post-commit diffs, orchestrator-mediated review, executor simplification
-- [ ] **Phase 7: Add Reviewer Lifecycle Management to Broker** - Broker-internal subprocess spawning, auto-scaling pool, fenced reclaim, lifecycle audit
+- [x] **Phase 7: Add Reviewer Lifecycle Management to Broker** - Broker-internal subprocess spawning, auto-scaling pool, fenced reclaim, lifecycle audit
 
 ## Phase Details
 
@@ -131,10 +131,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- Schema foundation: reviewers table, fence token columns, state machine update, config validation, prompt template
-- [ ] 07-02-PLAN.md -- ReviewerPool class with subprocess spawning, platform-aware argv builder, drain/terminate lifecycle
-- [ ] 07-03-PLAN.md -- Fenced reclaim: claim_generation fence tokens, claimed_at timestamps, stale verdict rejection
-- [ ] 07-04-PLAN.md -- Auto-scaling, background tasks, MCP tools (spawn/kill/list), lifespan integration, stale session recovery
+- [x] 07-01-PLAN.md -- Schema foundation: reviewers table, fence token columns, state machine update, config validation, prompt template
+- [x] 07-02-PLAN.md -- ReviewerPool class with subprocess spawning, platform-aware argv builder, drain/terminate lifecycle
+- [x] 07-03-PLAN.md -- Fenced reclaim: claim_generation fence tokens, claimed_at timestamps, stale verdict rejection
+- [x] 07-04-PLAN.md -- Auto-scaling, background tasks, MCP tools (spawn/kill/list), lifespan integration, stale session recovery
 
 ## Progress
 
@@ -149,4 +149,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 4. GSD Workflow Integration | 3/3 | Complete | 2026-02-17 |
 | 5. Observability and Validation | 2/2 | Complete | 2026-02-18 |
 | 6. Review Gate Enforcement | 1/1 | Complete | 2026-02-18 |
-| 7. Reviewer Lifecycle Management | 0/4 | Planned | - |
+| 7. Reviewer Lifecycle Management | 4/4 | Complete | 2026-02-18 |

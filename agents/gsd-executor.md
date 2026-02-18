@@ -189,6 +189,11 @@ The executor's role:
 2. Return task results including git diff to the orchestrator
 3. The orchestrator submits the diff for review
 
+Record the starting git ref before the first task so orchestrator can reconstruct the exact plan diff:
+```bash
+PLAN_START_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
+```
+
 No tandem configuration is read or applied by the executor.
 </tandem_config>
 
@@ -421,16 +426,31 @@ Separate from per-task commits — captures execution results only.
 </final_commit>
 
 <completion_format>
+Before writing completion output, capture end ref and changed files:
+```bash
+PLAN_END_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
+PLAN_CHANGED_FILES=$(git diff --name-only "${PLAN_START_REF}..${PLAN_END_REF}" 2>/dev/null)
+PLAN_PATCH_PATH=".planning/tmp/review-$(date +%Y%m%d-%H%M%S)-$$.patch"
+mkdir -p .planning/tmp
+git diff "${PLAN_START_REF}..${PLAN_END_REF}" > "${PLAN_PATCH_PATH}"
+```
+
 ```markdown
 ## PLAN COMPLETE
 
 **Plan:** {phase}-{plan}
 **Tasks:** {completed}/{total}
 **SUMMARY:** {path to SUMMARY.md}
+**Plan Ref Range:** {PLAN_START_REF}..{PLAN_END_REF}
+**Plan Diff File:** {PLAN_PATCH_PATH}
 
 **Commits:**
 - {hash}: {message}
 - {hash}: {message}
+
+**Changed Files ({PLAN_START_REF}..{PLAN_END_REF}):**
+- {file path}
+- {file path}
 
 **Duration:** {time}
 ```

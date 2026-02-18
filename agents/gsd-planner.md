@@ -1012,12 +1012,18 @@ TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enable
 If `TANDEM_ENABLED=false`: Skip this section entirely. Proceed to write PLAN.md as normal.
 
 **Step 2: Submit plan for review:**
+Resolve project scope for the review:
+```bash
+PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+```
+
 Call `mcp__gsdreview__create_review` with:
 - `intent`: "Plan {phase}-{plan}: {brief plan objective}"
 - `agent_type`: "gsd-planner"
 - `agent_role`: "proposer"
 - `phase`: the phase number
 - `plan`: the plan number
+- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
 - `category`: "plan_review"
 - `description`: The full PLAN.md content that was drafted (the complete markdown including frontmatter)
 - `diff`: null (plans are content, not diffs)
@@ -1026,7 +1032,7 @@ Call `mcp__gsdreview__create_review` with:
 Loop:
   Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
   - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write PLAN.md to disk.
-  - If `status == "changes_requested"`: Read `verdict_reason`, revise PLAN.md content, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_PLAN_CONTENT, ...)`, then return to polling.
+  - If `status == "changes_requested"`: Read `verdict_reason`, revise PLAN.md content, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_PLAN_CONTENT, ...)`, then return to polling.
 
 **Step 4: After approval, write PLAN.md to disk using Write tool (existing behavior).**
 

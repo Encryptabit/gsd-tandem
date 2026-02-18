@@ -3,12 +3,103 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import aiosqlite
 import pytest
 
 from gsd_review_broker import db as db_module
 from gsd_review_broker.db import ensure_schema
+
+
+async def test_reviewers_table_exists(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        """INSERT INTO reviewers (
+               id, display_name, session_token, status
+           ) VALUES (?, ?, ?, ?)""",
+        ("codex-r1-a7f3b2e1", "codex-r1", "a7f3b2e1", "active"),
+    )
+    cursor = await db.execute(
+        "SELECT id, status FROM reviewers WHERE id = ?", ("codex-r1-a7f3b2e1",)
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row["id"] == "codex-r1-a7f3b2e1"
+    assert row["status"] == "active"
+
+
+async def test_claim_generation_column_exists(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        """INSERT INTO reviews (
+               id, status, intent, agent_type, agent_role, phase
+           ) VALUES (?, ?, ?, ?, ?, ?)""",
+        ("review-claim-gen", "pending", "intent", "gsd-executor", "proposer", "1"),
+    )
+    cursor = await db.execute(
+        "SELECT claim_generation FROM reviews WHERE id = ?",
+        ("review-claim-gen",),
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row["claim_generation"] == 0
+
+
+async def test_claimed_at_column_exists(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        """INSERT INTO reviews (
+               id, status, intent, agent_type, agent_role, phase
+           ) VALUES (?, ?, ?, ?, ?, ?)""",
+        ("review-claimed-at", "pending", "intent", "gsd-executor", "proposer", "1"),
+    )
+    cursor = await db.execute(
+        "SELECT claimed_at FROM reviews WHERE id = ?",
+        ("review-claimed-at",),
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row["claimed_at"] is None
+
+
+async def test_audit_events_review_id_migrates_to_nullable() -> None:
+    conn = await aiosqlite.connect(":memory:", isolation_level=None)
+    conn.row_factory = aiosqlite.Row
+    await conn.executescript(
+        """CREATE TABLE audit_events (
+               id          INTEGER PRIMARY KEY AUTOINCREMENT,
+               review_id   TEXT NOT NULL,
+               event_type  TEXT NOT NULL,
+               actor       TEXT,
+               old_status  TEXT,
+               new_status  TEXT,
+               metadata    TEXT,
+               created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           );"""
+    )
+    await conn.execute(
+        """INSERT INTO audit_events (review_id, event_type, actor)
+           VALUES ('legacy-review', 'review_created', 'proposer')"""
+    )
+
+    await ensure_schema(conn)
+
+    cursor = await conn.execute("PRAGMA table_info(audit_events)")
+    table_info = await cursor.fetchall()
+    review_id_column = next(row for row in table_info if row["name"] == "review_id")
+    assert review_id_column["notnull"] == 0
+
+    await conn.execute(
+        """INSERT INTO audit_events (review_id, event_type, actor)
+           VALUES (NULL, 'reviewer_spawned', 'pool-manager')"""
+    )
+    cursor = await conn.execute(
+        """SELECT review_id FROM audit_events
+           WHERE event_type = 'reviewer_spawned'
+           ORDER BY id DESC LIMIT 1"""
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row["review_id"] is None
+    await conn.close()
 
 
 class TestSchemaMigration:
@@ -179,3 +270,31 @@ async def test_install_windows_proactor_noise_filter_is_noop_on_non_windows(
         assert loop.get_exception_handler() is previous_handler
     finally:
         loop.set_exception_handler(original)
+
+
+def test_resolve_db_path_honors_env_override(monkeypatch) -> None:
+    custom_path = "~/custom-broker/reviews.sqlite3"
+    monkeypatch.setenv(db_module.DB_PATH_ENV_VAR, custom_path)
+    path = db_module.resolve_db_path(repo_root="/ignored/repo")
+    assert path == Path(custom_path).expanduser()
+
+
+def test_resolve_db_path_uses_xdg_config_home(monkeypatch) -> None:
+    monkeypatch.delenv(db_module.DB_PATH_ENV_VAR, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
+    monkeypatch.setattr(db_module.os, "name", "posix")
+    monkeypatch.setattr(db_module.sys, "platform", "linux")
+
+    path = db_module.resolve_db_path(repo_root=None)
+    assert path == Path("/tmp/xdg-config/gsd-review-broker/codex_review_broker.sqlite3")
+
+
+def test_resolve_db_path_uses_home_config_fallback(monkeypatch) -> None:
+    monkeypatch.delenv(db_module.DB_PATH_ENV_VAR, raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(db_module.os, "name", "posix")
+    monkeypatch.setattr(db_module.sys, "platform", "linux")
+    monkeypatch.setattr(db_module.Path, "home", staticmethod(lambda: Path("/home/tester")))
+
+    path = db_module.resolve_db_path(repo_root=None)
+    assert path == Path("/home/tester/.config/gsd-review-broker/codex_review_broker.sqlite3")

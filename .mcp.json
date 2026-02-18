@@ -3,6 +3,11 @@
     "gsdreview": {
       "type": "http",
       "url": "http://0.0.0.0:8321/mcp"
+    },
+    "codex-wsl": {
+      "type": "stdio",
+      "command": "wsl",
+      "args": ["--", "codex", "mcp-server"]
     }
   }
 }

@@ -1,5 +1,5 @@
 <purpose>
-Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification. Default flow: Research (if needed) -> Plan -> Verify -> Done. Orchestrates gsd-phase-researcher, gsd-planner, and gsd-plan-checker agents with a revision loop (max 3 iterations).
+Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification. Default flow: Research (if needed) -> Plan -> Verify -> Tandem review gate (if enabled) -> Done. Orchestrates gsd-phase-researcher, gsd-planner, and gsd-plan-checker agents with a revision loop (max 3 iterations).
 </purpose>
 
 <required_reading>
@@ -341,11 +341,66 @@ Display: `Max iterations reached. {N} issues remain:` + issue list
 
 Offer: 1) Force proceed, 2) Provide guidance and retry, 3) Abandon
 
-## 13. Present Final Status
+## 13. Tandem Plan Review Gate
+
+**When:** After plans are finalized (post-checker pass, override, or skip-verify path) but BEFORE final status and auto-advance routing.
+**Skip if:** tandem is disabled.
+
+**Step 1: Check tandem config:**
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+```
+
+If `TANDEM_ENABLED=false`: Skip this gate and proceed to step 14.
+
+**Step 2: Build review payload from final plans:**
+```bash
+PLANS_CONTENT=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+```
+
+If `PLANS_CONTENT` is empty: skip gate and proceed to step 14.
+
+Resolve project scope:
+```bash
+PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+```
+
+Call `mcp__gsdreview__create_review` with:
+- `intent`: "Phase {phase_number} plans: {phase_name}"
+- `agent_type`: "gsd-planner"
+- `agent_role`: "proposer"
+- `phase`: "{phase_number}"
+- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
+- `category`: "plan_review"
+- `description`: The full plan set content (`PLANS_CONTENT`)
+- `diff`: null (planning gate reviews artifact content)
+
+**Step 3: Wait for verdict (long-poll):**
+Loop:
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
+  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to step 14.
+  - If `status == "changes_requested"`:
+    1. Read `verdict_reason`
+    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists:
+       - Apply/merge the counter-patch edits into PLAN artifacts first
+       - Call `mcp__gsdreview__accept_counter_patch(review_id=ID)` once incorporated
+    4. Spawn planner revision using `verdict_reason` + counter-patch content as required fixes
+    5. If plan checker is enabled (and `--skip-verify` was not set), re-run checker (steps 10-11)
+    6. Rebuild `PLANS_CONTENT`, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=UPDATED_PLANS_CONTENT, ...)`
+    7. Return to polling loop
+
+**Step 4: Error handling**
+If any `mcp__gsdreview__*` call fails with a connection error on first attempt:
+- Log warning: "Review broker unreachable. Proceeding in solo mode."
+- Set `TANDEM_ENABLED=false` for remainder of execution
+- Proceed to step 14
+
+## 14. Present Final Status
 
 Route to `<offer_next>` OR `auto_advance` depending on flags/config.
 
-## 14. Auto-Advance Check
+## 15. Auto-Advance Check
 
 Check for auto-advance trigger:
 
@@ -447,6 +502,7 @@ Verification: {Passed | Passed with override | Skipped}
 - [ ] Plans created (PLANNING COMPLETE or CHECKPOINT handled)
 - [ ] gsd-plan-checker spawned with CONTEXT.md
 - [ ] Verification passed OR user override OR max iterations with user decision
+- [ ] Tandem plan review gate passed when tandem is enabled (or cleanly skipped/fell back)
 - [ ] User sees status between agent spawns
 - [ ] User knows next steps
 </success_criteria>

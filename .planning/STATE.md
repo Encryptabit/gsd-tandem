@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Phase 6 complete -- review gate enforcement
+**Current focus:** Phase 7 complete -- reviewer lifecycle management
 
 ## Current Position
 
-Phase: 6 of 6 (Review Gate Enforcement)
-Plan: 1 of 1 in current phase
+Phase: 7 of 7 (Add Reviewer Lifecycle Management to Broker)
+Plan: 4 of 4 in current phase
 Status: Complete
-Last activity: 2026-02-18 -- Completed 06-01-PLAN.md
+Last activity: 2026-02-18 -- Completed 07-04-PLAN.md
 
-Progress: [############] 100% (13/13 plans)
+Progress: [############] 100% (17/17 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: ~5.9 minutes
-- Total execution time: ~71 minutes
+- Total plans completed: 17
+- Average duration: ~6.2 minutes
+- Total execution time: ~105 minutes
 
 **By Phase:**
 
@@ -31,12 +31,13 @@ Progress: [############] 100% (13/13 plans)
 | 2. Proposal and Diff Protocol | 2/2 | ~11 min | ~5.5 min |
 | 3. Discussion and Patches | 2/2 | ~13 min | ~6.5 min |
 | 4. GSD Workflow Integration | 3/3 | ~11 min | ~3.7 min |
-| 5. Observability and Validation | 1/2 | ~6 min | ~6 min |
+| 5. Observability and Validation | 2/2 | ~14 min | ~7 min |
 | 6. Review Gate Enforcement | 1/1 | ~9 min | ~9 min |
+| 7. Reviewer Lifecycle Management | 4/4 | ~60 min | ~15 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-02 (~4 min), 04-03 (~4 min), 05-01 (~6 min), 06-01 (~9 min)
-- Trend: Slight increase (06-01 longer due to cross-cutting changes across broker, executor, and workflow)
+- Last 5 plans: 06-01 (~9 min), 07-01 (~18 min), 07-02 (~24 min), 07-03 (~31 min), 07-04 (~29 min)
+- Trend: Increased complexity in Phase 7 due cross-cutting broker/runtime/test integration
 
 *Updated after each plan completion*
 
@@ -74,6 +75,11 @@ Recent decisions affecting current work:
 - [06-01]: skip_diff_validation persisted as INTEGER column on reviews table, respected by both create_review and claim_review
 - [06-01]: Wave parallelism forced off when tandem_enabled=true to ensure clean per-plan diffs
 - [06-01]: CLAUDE.md removed from .gitignore so tandem review rule is version-controlled
+- [07-01]: reviewer_pool missing-key behavior resolves to disabled pool (`None`) for backward compatibility
+- [07-02]: reviewer subprocesses use shell-free argv and DEVNULL stdio to avoid long-running pipe deadlocks
+- [07-02]: spawn DB-write failure path terminates orphan subprocesses before returning error
+- [07-03]: claim fencing is strict for broker-managed reviewers while preserving legacy manual-claim compatibility
+- [07-04]: startup recovery performs ownership sweep reclaim for all claimed reviews not owned by live current-session reviewers
 
 ### Pending Todos
 
@@ -81,7 +87,7 @@ Recent decisions affecting current work:
 
 ### Roadmap Evolution
 
-- Phase 7 added: Add Reviewer Lifecycle Management to Broker
+- Phase 7 executed and completed
 
 ### Blockers/Concerns
 
@@ -90,6 +96,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-18T14:10:00Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-add-reviewer-lifecycle-management-to-broker/07-CONTEXT.md
+Last session: 2026-02-18T08:00:00Z
+Stopped at: Phase 7 execution complete
+Resume file: .planning/phases/07-add-reviewer-lifecycle-management-to-broker/07-VERIFICATION.md

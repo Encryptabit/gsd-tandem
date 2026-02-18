@@ -45,5 +45,5 @@ async def db() -> AsyncIterator[aiosqlite.Connection]:
 @pytest.fixture
 def ctx(db: aiosqlite.Connection) -> MockContext:
     """Create a MockContext wrapping the in-memory db fixture."""
-    app = AppContext(db=db, notifications=NotificationBus())
+    app = AppContext(db=db, notifications=NotificationBus(), pool=None)
     return MockContext(fastmcp=_MockFastMCP(_lifespan_result=app))

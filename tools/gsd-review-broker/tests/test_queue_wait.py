@@ -79,16 +79,30 @@ class TestListReviewsWaitBlocking:
         assert "delayed review" in intents
         await task
 
+    async def test_wait_with_projects_filter_ignores_other_projects(
+        self, ctx: MockContext
+    ) -> None:
+        """wait=True + projects filter returns once a matching project arrives."""
+
+        async def create_reviews_after_delay():
+            await asyncio.sleep(0.05)
+            await _create_pending(ctx, intent="beta review", project="beta")
+            await asyncio.sleep(0.05)
+            await _create_pending(ctx, intent="alpha review", project="alpha")
+
+        task = asyncio.create_task(create_reviews_after_delay())
+        result = await list_reviews.fn(
+            status="pending", projects=["alpha"], wait=True, ctx=ctx
+        )
+        assert "error" not in result
+        assert len(result["reviews"]) >= 1
+        intents = [r["intent"] for r in result["reviews"]]
+        assert "alpha review" in intents
+        assert "beta review" not in intents
+        await task
+
     async def test_wait_times_out_returns_empty(self, ctx: MockContext) -> None:
         """If no review arrives within timeout, returns empty list."""
-        # Monkey-patch a short timeout for this test
-        original = list_reviews.fn
-
-        async def short_timeout_list(**kwargs):
-            # We can't easily override the 25s, so just verify immediate empty
-            # when no signal arrives. Use the bus directly.
-            pass
-
         # Direct test: call list with wait, but the bus will time out.
         # We override wait_for_change timeout via the bus directly.
         app = ctx.lifespan_context

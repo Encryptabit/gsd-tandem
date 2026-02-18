@@ -305,12 +305,17 @@ If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to commit as normal.
 
 **Step 2: Submit finalized UAT for review:**
 Read the full finalized UAT content (`{phase_num}-UAT.md`) into memory.
+Resolve project scope for the review:
+```bash
+PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+```
 
 Call `mcp__gsdreview__create_review` with:
 - `intent`: "Phase {phase_num} UAT verification: {passed} passed, {issues} issues"
 - `agent_type`: "gsd-verifier"
 - `agent_role`: "proposer"
 - `phase`: "{phase_num}"
+- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
 - `category`: "verification"
 - `description`: The full finalized UAT.md content (complete markdown)
 - `diff`: null (UAT is content, not diffs)
@@ -319,7 +324,12 @@ Call `mcp__gsdreview__create_review` with:
 Loop:
   Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
   - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to commit.
-  - If `status == "changes_requested"`: Read `verdict_reason`, refine UAT summary/diagnosis notes accordingly, resubmit revised content via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_UAT_MD_CONTENT, ...)`, then return to polling.
+  - If `status == "changes_requested"`:
+    1. Read `verdict_reason`
+    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists, merge those edits into revised UAT content and call `mcp__gsdreview__accept_counter_patch(review_id=ID)`.
+    4. Resubmit revised content via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_UAT_MD_CONTENT, ...)`.
+    5. Return to polling.
 
 **Step 4: After approval, proceed to commit (existing behavior).**
 

@@ -7,6 +7,7 @@ from gsd_review_broker.models import ReviewStatus
 VALID_TRANSITIONS: dict[ReviewStatus, set[ReviewStatus]] = {
     ReviewStatus.PENDING: {ReviewStatus.CLAIMED},
     ReviewStatus.CLAIMED: {
+        ReviewStatus.PENDING,  # reclaim on timeout
         ReviewStatus.IN_REVIEW,
         ReviewStatus.APPROVED,
         ReviewStatus.CHANGES_REQUESTED,

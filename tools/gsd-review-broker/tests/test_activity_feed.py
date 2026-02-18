@@ -72,16 +72,24 @@ class TestActivityFeedBasic:
         result = await get_activity_feed.fn(ctx=ctx)
         entry = result["reviews"][0]
         iso_pattern = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z"
-        assert re.match(iso_pattern, entry["created_at"]), f"created_at not ISO 8601: {entry['created_at']}"
-        assert re.match(iso_pattern, entry["updated_at"]), f"updated_at not ISO 8601: {entry['updated_at']}"
+        assert re.match(
+            iso_pattern, entry["created_at"]
+        ), f"created_at not ISO 8601: {entry['created_at']}"
+        assert re.match(
+            iso_pattern, entry["updated_at"]
+        ), f"updated_at not ISO 8601: {entry['updated_at']}"
 
     async def test_feed_message_preview_and_count(self, ctx: MockContext) -> None:
         """Feed entry includes message count, last_message_at, and truncated preview."""
         created = await _create_review(ctx)
         rid = created["review_id"]
         await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
-        await add_message.fn(review_id=rid, sender_role="reviewer", body="First message body", ctx=ctx)
-        await add_message.fn(review_id=rid, sender_role="proposer", body="Second message body", ctx=ctx)
+        await add_message.fn(
+            review_id=rid, sender_role="reviewer", body="First message body", ctx=ctx
+        )
+        await add_message.fn(
+            review_id=rid, sender_role="proposer", body="Second message body", ctx=ctx
+        )
 
         result = await get_activity_feed.fn(ctx=ctx)
         entry = result["reviews"][0]
@@ -110,7 +118,7 @@ class TestActivityFeedFilters:
     async def test_filter_by_status(self, ctx: MockContext) -> None:
         """Filtering by status returns only matching reviews."""
         r1 = await _create_review(ctx, intent="pending one")
-        r2 = await _create_review(ctx, intent="pending two")
+        await _create_review(ctx, intent="pending two")
         await claim_review.fn(review_id=r1["review_id"], reviewer_id="rev-1", ctx=ctx)
 
         pending = await get_activity_feed.fn(status="pending", ctx=ctx)
@@ -131,10 +139,20 @@ class TestActivityFeedFilters:
         assert result["count"] == 1
         assert result["reviews"][0]["intent"] == "code"
 
+    async def test_filter_by_project(self, ctx: MockContext) -> None:
+        """Filtering by project returns only matching reviews."""
+        await _create_review(ctx, intent="alpha plan", project="alpha")
+        await _create_review(ctx, intent="beta plan", project="beta")
+
+        result = await get_activity_feed.fn(project="alpha", ctx=ctx)
+        assert result["count"] == 1
+        assert result["reviews"][0]["intent"] == "alpha plan"
+        assert result["reviews"][0]["project"] == "alpha"
+
     async def test_combined_filters(self, ctx: MockContext) -> None:
         """Filtering by status AND category narrows results correctly."""
         r1 = await _create_review(ctx, intent="pending plan", category="plan_review")
-        r2 = await _create_review(ctx, intent="pending code", category="code_change")
+        await _create_review(ctx, intent="pending code", category="code_change")
         await claim_review.fn(review_id=r1["review_id"], reviewer_id="rev-1", ctx=ctx)
 
         result = await get_activity_feed.fn(status="pending", category="code_change", ctx=ctx)
@@ -203,7 +221,7 @@ class TestAuditLog:
     async def test_audit_log_per_review(self, ctx: MockContext) -> None:
         """get_audit_log with review_id returns events for that review only."""
         r1 = await _create_review(ctx, intent="review one")
-        r2 = await _create_review(ctx, intent="review two")
+        await _create_review(ctx, intent="review two")
 
         log1 = await get_audit_log.fn(review_id=r1["review_id"], ctx=ctx)
         assert log1["review_id"] == r1["review_id"]

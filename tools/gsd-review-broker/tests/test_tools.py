@@ -65,9 +65,10 @@ class TestCreateReview:
             phase="2",
             plan="02-01",
             task="3",
+            project="alpha",
         )
         cursor = await ctx.lifespan_context.db.execute(
-            "SELECT agent_type, agent_role, phase, plan, task FROM reviews WHERE id = ?",
+            "SELECT agent_type, agent_role, phase, plan, task, project FROM reviews WHERE id = ?",
             (result["review_id"],),
         )
         row = await cursor.fetchone()
@@ -76,6 +77,7 @@ class TestCreateReview:
         assert row["phase"] == "2"
         assert row["plan"] == "02-01"
         assert row["task"] == "3"
+        assert row["project"] == "alpha"
 
 
 # ---- list_reviews tests ----
@@ -102,6 +104,34 @@ class TestListReviews:
         pending = await list_reviews.fn(status="pending", ctx=ctx)
         assert len(pending["reviews"]) == 1
         assert pending["reviews"][0]["intent"] == "second"
+
+    async def test_list_reviews_with_project_filter(self, ctx: MockContext) -> None:
+        await _create_review(ctx, intent="alpha review", project="alpha")
+        await _create_review(ctx, intent="beta review", project="beta")
+        scoped = await list_reviews.fn(project="alpha", ctx=ctx)
+        assert len(scoped["reviews"]) == 1
+        assert scoped["reviews"][0]["intent"] == "alpha review"
+        assert scoped["reviews"][0]["project"] == "alpha"
+
+    async def test_list_reviews_with_projects_filter(self, ctx: MockContext) -> None:
+        await _create_review(ctx, intent="alpha review", project="alpha")
+        await _create_review(ctx, intent="beta review", project="beta")
+        await _create_review(ctx, intent="gamma review", project="gamma")
+        scoped = await list_reviews.fn(projects=["alpha", "gamma"], ctx=ctx)
+        intents = {item["intent"] for item in scoped["reviews"]}
+        assert intents == {"alpha review", "gamma review"}
+
+    async def test_list_reviews_rejects_project_and_projects_together(
+        self, ctx: MockContext
+    ) -> None:
+        result = await list_reviews.fn(project="alpha", projects=["beta"], ctx=ctx)
+        assert "error" in result
+        assert "either 'project' or 'projects'" in result["error"]
+
+    async def test_list_reviews_rejects_empty_projects_filter(self, ctx: MockContext) -> None:
+        result = await list_reviews.fn(projects=[], ctx=ctx)
+        assert "error" in result
+        assert "at least one" in result["error"]
 
 
 # ---- claim_review tests ----
@@ -167,6 +197,7 @@ class TestSubmitVerdict:
             review_id=created["review_id"],
             verdict="approved",
             reason="Looks good",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
         assert result["status"] == "approved"
@@ -181,6 +212,7 @@ class TestSubmitVerdict:
             review_id=created["review_id"],
             verdict="changes_requested",
             reason="Needs refactor",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
         assert result["status"] == "changes_requested"
@@ -222,6 +254,7 @@ class TestSubmitVerdict:
             review_id=created["review_id"],
             verdict="comment",
             reason="Consider using a dataclass here",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
         assert result["verdict"] == "comment"
@@ -302,7 +335,10 @@ class TestSubmitVerdict:
             review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
         )
         result = await submit_verdict.fn(
-            review_id=created["review_id"], verdict="approved", ctx=ctx
+            review_id=created["review_id"],
+            verdict="approved",
+            reviewer_id="reviewer-1",
+            ctx=ctx,
         )
         assert result["status"] == "approved"
         assert result["verdict_reason"] is None
@@ -318,7 +354,10 @@ class TestCloseReview:
             review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
         )
         await submit_verdict.fn(
-            review_id=created["review_id"], verdict="approved", ctx=ctx
+            review_id=created["review_id"],
+            verdict="approved",
+            reviewer_id="reviewer-1",
+            ctx=ctx,
         )
         result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
         assert result["status"] == "closed"
@@ -332,6 +371,7 @@ class TestCloseReview:
             review_id=created["review_id"],
             verdict="changes_requested",
             reason="Needs refactor",
+            reviewer_id="reviewer-1",
             ctx=ctx,
         )
         result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
@@ -377,6 +417,7 @@ class TestFullLifecycle:
             review_id=review_id,
             verdict="approved",
             reason="Implementation looks correct",
+            reviewer_id="reviewer-agent",
             ctx=ctx,
         )
         assert verdict["status"] == "approved"
