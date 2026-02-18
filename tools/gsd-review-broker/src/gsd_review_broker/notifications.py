@@ -12,6 +12,10 @@ import time
 from dataclasses import dataclass, field
 
 
+QUEUE_TOPIC = "__queue__"
+"""Reserved topic fired whenever a review enters the pending state (new or revised)."""
+
+
 @dataclass
 class NotificationBus:
     """Per-review asyncio.Event bus for internal change signaling.

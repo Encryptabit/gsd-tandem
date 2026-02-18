@@ -13,10 +13,22 @@ from gsd_review_broker.notifications import NotificationBus
 
 
 @dataclass
-class MockContext:
-    """Minimal mock for fastmcp.Context that provides lifespan_context."""
+class _MockFastMCP:
+    """Stands in for the FastMCP instance so ctx.fastmcp._lifespan_result works."""
 
-    lifespan_context: AppContext
+    _lifespan_result: AppContext
+
+
+@dataclass
+class MockContext:
+    """Minimal mock for fastmcp.Context that provides fastmcp._lifespan_result."""
+
+    fastmcp: _MockFastMCP
+
+    @property
+    def lifespan_context(self) -> AppContext:
+        """Backwards-compat alias used by tests that access ctx.lifespan_context directly."""
+        return self.fastmcp._lifespan_result
 
 
 @pytest.fixture
@@ -33,4 +45,5 @@ async def db() -> AsyncIterator[aiosqlite.Connection]:
 @pytest.fixture
 def ctx(db: aiosqlite.Connection) -> MockContext:
     """Create a MockContext wrapping the in-memory db fixture."""
-    return MockContext(lifespan_context=AppContext(db=db, notifications=NotificationBus()))
+    app = AppContext(db=db, notifications=NotificationBus())
+    return MockContext(fastmcp=_MockFastMCP(_lifespan_result=app))

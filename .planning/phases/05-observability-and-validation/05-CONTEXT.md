@@ -15,7 +15,7 @@ Real-time visibility into broker activity, complete review history with audit lo
 
 ### Status & Monitoring
 - Full activity feed by default — show all reviews (active + recent completed), not just a summary dashboard
-- Filterable by status (pending, claimed, approved, rejected, closed) AND category (plan_review, code_review, handoff, verification)
+- Filterable by status (pending, claimed, approved, rejected, closed) AND category (plan_review, code_change, handoff, verification)
 - Absolute ISO 8601 timestamps throughout (not relative "3 min ago")
 - Each review in the feed includes a truncated preview of the most recent message, plus message count and last_message_at
 

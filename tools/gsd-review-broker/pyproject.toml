@@ -11,6 +11,7 @@ dependencies = [
     "fastmcp>=2.14,<3",
     "aiosqlite>=0.22,<1",
     "unidiff>=0.7.5,<1",
+    "python-dotenv>=1.0,<2",
 ]
 
 [project.optional-dependencies]

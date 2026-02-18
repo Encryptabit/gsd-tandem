@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -13,7 +14,8 @@ from fastmcp import FastMCP
 
 from gsd_review_broker.notifications import NotificationBus
 
-DB_PATH = Path(".planning") / "codex_review_broker.sqlite3"
+DB_FILENAME = Path(".planning") / "codex_review_broker.sqlite3"
+logger = logging.getLogger("gsd_review_broker")
 
 SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS reviews (
@@ -119,12 +121,21 @@ async def discover_repo_root() -> str | None:
     return None
 
 
+def resolve_db_path(repo_root: str | None) -> Path:
+    """Resolve the database path, preferring the git repo root over CWD."""
+    if repo_root:
+        return Path(repo_root) / DB_FILENAME
+    return DB_FILENAME
+
+
 @asynccontextmanager
 async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     """Initialize SQLite with WAL mode at server startup, clean up on shutdown."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    repo_root = await discover_repo_root()
+    db_path = resolve_db_path(repo_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     db = await aiosqlite.connect(
-        str(DB_PATH),
+        str(db_path),
         isolation_level=None,  # CRITICAL: enables manual BEGIN IMMEDIATE
     )
     db.row_factory = aiosqlite.Row
@@ -133,7 +144,7 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA foreign_keys=ON")
     await ensure_schema(db)
-    repo_root = await discover_repo_root()
+    logger.info("Broker ready - db=%s, repo=%s", db_path, repo_root or "cwd")
     try:
         yield AppContext(db=db, repo_root=repo_root)
     finally:

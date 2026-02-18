@@ -1,0 +1,41 @@
+[2026-02-17T07:24:07Z] Phase 3 execution watch started.
+[2026-02-17T07:24:07Z] Monitoring 20 files (11 in expected plan scope).
+[2026-02-17T07:24:21Z] File changed: tools/gsd-review-broker/tests/conftest.py
+[2026-02-17T07:24:36Z] File changed: tools/gsd-review-broker/tests/test_priority.py
+[2026-02-17T07:24:51Z] File changed: tools/gsd-review-broker/tests/test_notifications.py
+[2026-02-17T07:25:20Z] File changed: tools/gsd-review-broker/tests/test_priority.py
+[2026-02-17T07:26:18Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:26:31Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:26:47Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:27:15Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:28:42Z] File changed: tools/gsd-review-broker/tests/test_messages.py
+[2026-02-17T07:29:10Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:29:26Z] File changed: tools/gsd-review-broker/tests/test_messages.py
+[2026-02-17T07:29:39Z] File changed: tools/gsd-review-broker/tests/test_messages.py
+[2026-02-17T07:31:06Z] 03-01 summary detected. Running focused smoke tests.
+[2026-02-17T07:31:22Z] 03-01 smoke tests failed.
+[03-01-smoke] Using CPython 3.13.7
+[03-01-smoke] Removed virtual environment at: .venv
+[03-01-smoke] Creating virtual environment at: .venv
+[03-01-smoke] warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+[03-01-smoke]          If the cache and target directories are on different filesystems, hardlinking may not be supported.
+[03-01-smoke]          If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+[03-01-smoke] Installed 88 packages in 7.51s
+[03-01-smoke] error: Failed to spawn: `pytest`
+[03-01-smoke]   Caused by: No such file or directory (os error 2)
+[2026-02-17T07:38:35Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:38:49Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:39:04Z] File changed: tools/gsd-review-broker/src/gsd_review_broker/tools.py
+[2026-02-17T07:52:17Z] File changed: tools/gsd-review-broker/tests/test_counter_patch.py
+[2026-02-17T07:53:30Z] 03-02 summary detected. Running focused smoke tests.
+[2026-02-17T07:53:43Z] 03-02 smoke tests failed.
+[03-02-smoke] Using CPython 3.13.7
+[03-02-smoke] Removed virtual environment at: .venv
+[03-02-smoke] Creating virtual environment at: .venv
+[03-02-smoke] warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+[03-02-smoke]          If the cache and target directories are on different filesystems, hardlinking may not be supported.
+[03-02-smoke]          If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+[03-02-smoke] Installed 88 packages in 5.85s
+[03-02-smoke] error: Failed to spawn: `pytest`
+[03-02-smoke]   Caused by: No such file or directory (os error 2)
+[2026-02-17T07:54:12Z] Both summaries detected and watcher quiet period reached. Exiting watcher.

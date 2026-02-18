@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import uuid
 from contextlib import suppress
 
@@ -12,12 +14,31 @@ from gsd_review_broker.audit import record_event
 from gsd_review_broker.db import AppContext
 from gsd_review_broker.diff_utils import extract_affected_files, validate_diff
 from gsd_review_broker.models import ReviewStatus
+from gsd_review_broker.notifications import QUEUE_TOPIC
 from gsd_review_broker.priority import infer_priority
 from gsd_review_broker.server import mcp
 from gsd_review_broker.state_machine import validate_transition
 
+logger = logging.getLogger("gsd_review_broker")
+
+
+def _app_ctx(ctx: Context) -> AppContext:
+    """Resolve the broker AppContext from a FastMCP Context, across versions."""
+    if ctx is None:
+        raise RuntimeError("Missing MCP context")
+    if hasattr(ctx, "lifespan_context"):
+        return ctx.lifespan_context
+    rc = getattr(ctx, "request_context", None)
+    if rc is not None and hasattr(rc, "lifespan_context"):
+        return rc.lifespan_context
+    fm = getattr(ctx, "fastmcp", None)
+    if fm is not None and hasattr(fm, "_lifespan_result"):
+        return fm._lifespan_result
+    raise RuntimeError("Unable to resolve broker lifespan context")
+
 
 def _db_error(tool_name: str, exc: Exception) -> dict:
+    logger.exception("%s -> database error: %s", tool_name, exc)
     return {"error": f"{tool_name} failed due to database error: {exc}"}
 
 
@@ -31,6 +52,20 @@ def _normalize_reason(reason: str | None) -> str | None:
 async def _rollback_quietly(app: AppContext) -> None:
     with suppress(Exception):
         await app.db.execute("ROLLBACK")
+
+
+def _short(review_id: str | None) -> str:
+    """Render compact review IDs in logs."""
+    if not review_id:
+        return "unknown"
+    return review_id[:8]
+
+
+def _clip(value: str, max_len: int = 72) -> str:
+    """Clamp long text for compact log lines."""
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
 
 
 @mcp.tool
@@ -58,13 +93,18 @@ async def create_review(
     Clears claimed_by and verdict_reason. Returns to pending status.
     Revised diffs are also validated before persistence.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     # Compute affected_files from diff if provided
     affected_files: str | None = None
     if diff is not None:
         is_valid, error_detail = await validate_diff(diff, cwd=app.repo_root)
         if not is_valid:
+            logger.info(
+                "create_review -> %s validation_failed (%s)",
+                _short(review_id),
+                _clip(error_detail or "no details"),
+            )
             return {
                 "error": "Diff validation failed on submission. Diff does not apply cleanly.",
                 "validation_error": error_detail,
@@ -120,6 +160,14 @@ async def create_review(
                 await _rollback_quietly(app)
                 return _db_error("create_review", exc)
         app.notifications.notify(review_id)
+        app.notifications.notify(QUEUE_TOPIC)
+        logger.info(
+            'create_review -> %s revised (phase=%s, category=%s) "%s"',
+            _short(review_id),
+            phase,
+            category or "uncategorized",
+            _clip(intent),
+        )
         return {"review_id": review_id, "status": ReviewStatus.PENDING, "revised": True}
 
     # --- New review flow ---
@@ -161,6 +209,14 @@ async def create_review(
             await _rollback_quietly(app)
             return _db_error("create_review", exc)
     app.notifications.notify(new_review_id)
+    app.notifications.notify(QUEUE_TOPIC)
+    logger.info(
+        'create_review -> %s new (phase=%s, category=%s) "%s"',
+        _short(new_review_id),
+        phase,
+        category or "uncategorized",
+        _clip(intent),
+    )
     return {"review_id": new_review_id, "status": ReviewStatus.PENDING}
 
 
@@ -168,6 +224,7 @@ async def create_review(
 async def list_reviews(
     status: str | None = None,
     category: str | None = None,
+    wait: bool = False,
     ctx: Context = None,
 ) -> dict:
     """List reviews, optionally filtered by status and/or category.
@@ -177,46 +234,96 @@ async def list_reviews(
 
     Use status='pending' to find reviews awaiting a reviewer.
     Use category to filter by review type (e.g. 'plan_review', 'code_change').
+
+    If wait=True, blocks up to 25 seconds until a pending review exists.
+    wait=True requires status='pending' to avoid ambiguous semantics.
     """
-    app: AppContext = ctx.lifespan_context
-    order_clause = (
-        "ORDER BY CASE COALESCE(priority, 'normal') "
-        "WHEN 'critical' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 END, "
-        "created_at ASC"
-    )
-    conditions: list[str] = []
-    params: list[str] = []
-    if status is not None:
-        conditions.append("status = ?")
-        params.append(status)
-    if category is not None:
-        conditions.append("category = ?")
-        params.append(category)
+    if wait and status != "pending":
+        logger.info(
+            "list_reviews -> invalid wait config (status=%s, category=%s)",
+            status,
+            category,
+        )
+        return {"error": "wait=True requires status='pending'"}
 
-    where_clause = ""
-    if conditions:
-        where_clause = "WHERE " + " AND ".join(conditions)
+    app: AppContext = _app_ctx(ctx)
 
-    cursor = await app.db.execute(
-        "SELECT id, status, intent, agent_type, phase, priority, category, created_at "
-        f"FROM reviews {where_clause} {order_clause}",
-        params,
-    )
-    rows = await cursor.fetchall()
-    reviews = [
-        {
-            "id": row["id"],
-            "status": row["status"],
-            "intent": row["intent"],
-            "agent_type": row["agent_type"],
-            "phase": row["phase"],
-            "priority": row["priority"],
-            "category": row["category"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
-    return {"reviews": reviews}
+    async def _query() -> list[dict]:
+        order_clause = (
+            "ORDER BY CASE COALESCE(priority, 'normal') "
+            "WHEN 'critical' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 END, "
+            "created_at ASC"
+        )
+        conditions: list[str] = []
+        params: list[str] = []
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if category is not None:
+            conditions.append("category = ?")
+            params.append(category)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        cursor = await app.db.execute(
+            "SELECT id, status, intent, agent_type, phase, priority, category, created_at "
+            f"FROM reviews {where_clause} {order_clause}",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "status": row["status"],
+                "intent": row["intent"],
+                "agent_type": row["agent_type"],
+                "phase": row["phase"],
+                "priority": row["priority"],
+                "category": row["category"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    if not wait:
+        reviews = await _query()
+        logger.info(
+            "list_reviews -> %s reviews (status=%s, category=%s, wait=false)",
+            len(reviews),
+            status,
+            category,
+        )
+        return {"reviews": reviews}
+
+    # Long-poll loop with a hard deadline so request latency stays bounded.
+    deadline = time.monotonic() + 25.0
+    while True:
+        # Capture version before reading to avoid missing a notify between steps.
+        version = app.notifications.current_version(QUEUE_TOPIC)
+        reviews = await _query()
+        if reviews:
+            logger.info(
+                "list_reviews -> %s reviews (status=%s, category=%s, wait=true)",
+                len(reviews),
+                status,
+                category,
+            )
+            return {"reviews": reviews}
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.info(
+                "list_reviews -> 0 reviews timeout (status=%s, category=%s, wait=true)",
+                status,
+                category,
+            )
+            return {"reviews": []}
+
+        await app.notifications.wait_for_change(
+            QUEUE_TOPIC, timeout=remaining, since_version=version
+        )
 
 
 @mcp.tool
@@ -234,7 +341,7 @@ async def claim_review(
     On successful claim, returns review metadata (intent, description, affected_files,
     has_diff flag) but NOT the full diff text. Use get_proposal to retrieve the diff.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     auto_rejected_result: dict | None = None
     diff_text: str | None = None
     async with app.write_lock:
@@ -309,6 +416,10 @@ async def claim_review(
 
     app.notifications.notify(review_id)
     if auto_rejected_result is not None:
+        logger.info(
+            "claim_review -> %s auto_rejected by validator",
+            _short(review_id),
+        )
         return auto_rejected_result
 
     # Build response with inline proposal metadata
@@ -328,6 +439,11 @@ async def claim_review(
             result["affected_files"] = row["affected_files"]
     if diff_text:
         result["has_diff"] = True
+    logger.info(
+        "claim_review -> %s claimed by %s",
+        _short(review_id),
+        reviewer_id,
+    )
     return result
 
 
@@ -354,20 +470,32 @@ async def submit_verdict(
 
     # --- Notes enforcement ---
     if verdict == "changes_requested" and normalized_reason is None:
+        logger.info("submit_verdict -> %s rejected (missing reason)", _short(review_id))
         return {"error": "Notes (reason) required for 'changes_requested' verdict."}
     if verdict == "comment" and normalized_reason is None:
+        logger.info("submit_verdict -> %s rejected (missing comment)", _short(review_id))
         return {"error": "Notes (reason) required for 'comment' verdict."}
 
     # --- Counter-patch validation (before any branch) ---
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     counter_affected: str | None = None
     if counter_patch is not None:
         if verdict not in ("changes_requested", "comment"):
+            logger.info(
+                "submit_verdict -> %s rejected (counter_patch not allowed for %s)",
+                _short(review_id),
+                verdict,
+            )
             return {
                 "error": "Counter-patches only allowed with changes_requested or comment verdicts"
             }
         is_valid, error_detail = await validate_diff(counter_patch, cwd=app.repo_root)
         if not is_valid:
+            logger.info(
+                "submit_verdict -> %s counter_patch invalid (%s)",
+                _short(review_id),
+                _clip(error_detail or "no details"),
+            )
             return {
                 "error": "Counter-patch diff validation failed",
                 "validation_error": error_detail,
@@ -430,6 +558,11 @@ async def submit_verdict(
         }
         if counter_patch is not None:
             result["has_counter_patch"] = True
+        logger.info(
+            "submit_verdict -> %s COMMENT (counter_patch=%s)",
+            _short(review_id),
+            bool(counter_patch is not None),
+        )
         return result
 
     # --- Standard verdicts (approved / changes_requested) ---
@@ -438,6 +571,7 @@ async def submit_verdict(
         "changes_requested": ReviewStatus.CHANGES_REQUESTED,
     }
     if verdict not in valid_verdicts:
+        logger.info("submit_verdict -> %s invalid verdict=%s", _short(review_id), verdict)
         return {
             "error": (
                 f"Invalid verdict: {verdict!r}. "
@@ -494,6 +628,12 @@ async def submit_verdict(
     }
     if counter_patch is not None:
         result["has_counter_patch"] = True
+    logger.info(
+        "submit_verdict -> %s %s (counter_patch=%s)",
+        _short(review_id),
+        verdict.upper(),
+        bool(counter_patch is not None),
+    )
     return result
 
 
@@ -503,7 +643,7 @@ async def close_review(
     ctx: Context = None,
 ) -> dict:
     """Close a review that has reached a terminal verdict (approved or changes_requested)."""
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -535,6 +675,7 @@ async def close_review(
             return _db_error("close_review", exc)
     app.notifications.notify(review_id)
     app.notifications.cleanup(review_id)
+    logger.info("close_review -> %s CLOSED", _short(review_id))
     return {"review_id": review_id, "status": ReviewStatus.CLOSED}
 
 
@@ -549,7 +690,7 @@ async def accept_counter_patch(
     If the counter-patch no longer applies cleanly, returns an error without
     modifying review state (the proposer can then reject it instead).
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -596,6 +737,7 @@ async def accept_counter_patch(
             return _db_error("accept_counter_patch", exc)
 
     app.notifications.notify(review_id)
+    logger.info("accept_counter_patch -> %s accepted", _short(review_id))
     return {
         "review_id": review_id,
         "counter_patch_status": "accepted",
@@ -609,7 +751,7 @@ async def reject_counter_patch(
     ctx: Context = None,
 ) -> dict:
     """Reject a pending counter-patch, clearing counter-patch columns."""
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
@@ -640,6 +782,7 @@ async def reject_counter_patch(
             return _db_error("reject_counter_patch", exc)
 
     app.notifications.notify(review_id)
+    logger.info("reject_counter_patch -> %s rejected", _short(review_id))
     return {"review_id": review_id, "counter_patch_status": "rejected"}
 
 
@@ -659,7 +802,7 @@ async def get_review_status(
     - wait=False (default): Traditional polling, recommended interval 3 seconds.
     - wait=True: Long-poll mode, call again immediately after each response.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     if wait:
         await app.notifications.wait_for_change(review_id, timeout=25.0)
@@ -673,8 +816,9 @@ async def get_review_status(
     )
     row = await cursor.fetchone()
     if row is None:
+        logger.info("get_review_status -> %s not found", _short(review_id))
         return {"error": f"Review {review_id} not found"}
-    return {
+    result = {
         "id": row["id"],
         "status": row["status"],
         "intent": row["intent"],
@@ -690,6 +834,13 @@ async def get_review_status(
         "category": row["category"],
         "updated_at": row["updated_at"],
     }
+    logger.info(
+        "get_review_status -> %s %s (wait=%s)",
+        _short(review_id),
+        row["status"],
+        wait,
+    )
+    return result
 
 
 @mcp.tool
@@ -702,7 +853,7 @@ async def get_proposal(
     Use after claim_review to read the complete unified diff for review.
     This is a read-only operation -- no state changes occur.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     cursor = await app.db.execute(
         """SELECT id, status, intent, description, diff, affected_files, category,
                   counter_patch, counter_patch_affected_files, counter_patch_status
@@ -711,6 +862,7 @@ async def get_proposal(
     )
     row = await cursor.fetchone()
     if row is None:
+        logger.info("get_proposal -> %s not found", _short(review_id))
         return {"error": f"Review {review_id} not found"}
 
     affected_files = None
@@ -727,7 +879,7 @@ async def get_proposal(
         except (json.JSONDecodeError, TypeError):
             counter_patch_affected_files = row["counter_patch_affected_files"]
 
-    return {
+    result = {
         "id": row["id"],
         "status": row["status"],
         "intent": row["intent"],
@@ -739,6 +891,12 @@ async def get_proposal(
         "counter_patch_affected_files": counter_patch_affected_files,
         "counter_patch_status": row["counter_patch_status"],
     }
+    logger.info(
+        "get_proposal -> %s loaded (has_diff=%s)",
+        _short(review_id),
+        bool(row["diff"]),
+    )
+    return result
 
 
 @mcp.tool
@@ -760,7 +918,7 @@ async def add_message(
     if sender_role not in ("proposer", "reviewer"):
         return {"error": f"Invalid sender_role: {sender_role!r}. Must be 'proposer' or 'reviewer'."}
 
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     msg_id = str(uuid.uuid4())
 
     async with app.write_lock:
@@ -825,6 +983,12 @@ async def add_message(
     # Fire notification outside write_lock
     app.notifications.notify(review_id)
 
+    logger.info(
+        "add_message -> %s by %s (round=%s)",
+        _short(review_id),
+        sender_role,
+        current_round,
+    )
     return {"message_id": msg_id, "review_id": review_id, "round": current_round}
 
 
@@ -839,13 +1003,14 @@ async def get_discussion(
     Returns all messages in chronological order. Optionally filter by round number.
     This is a read-only operation -- no state changes occur.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     # Verify review exists
     cursor = await app.db.execute(
         "SELECT id FROM reviews WHERE id = ?", (review_id,)
     )
     if await cursor.fetchone() is None:
+        logger.info("get_discussion -> %s not found", _short(review_id))
         return {"error": f"Review not found: {review_id}"}
 
     if round is not None:
@@ -881,6 +1046,12 @@ async def get_discussion(
             "created_at": msg_row["created_at"],
         })
 
+    logger.info(
+        "get_discussion -> %s messages=%s (round=%s)",
+        _short(review_id),
+        len(messages),
+        round if round is not None else "all",
+    )
     return {"review_id": review_id, "messages": messages, "count": len(messages)}
 
 
@@ -898,7 +1069,7 @@ async def get_activity_feed(
 
     Optionally filter by status and/or category.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
     conditions: list[str] = []
     params: list[str] = []
     if status is not None:
@@ -951,6 +1122,12 @@ async def get_activity_feed(
         }
         for row in rows
     ]
+    logger.info(
+        "get_activity_feed -> %s reviews (status=%s, category=%s)",
+        len(reviews),
+        status,
+        category,
+    )
     return {"reviews": reviews, "count": len(reviews)}
 
 
@@ -965,7 +1142,7 @@ async def get_audit_log(
     If omitted, returns ALL events across all reviews.
     Events are ordered by insertion order (ascending).
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     if review_id is not None:
         # Verify review exists
@@ -973,6 +1150,7 @@ async def get_audit_log(
             "SELECT id FROM reviews WHERE id = ?", (review_id,)
         )
         if await cursor.fetchone() is None:
+            logger.info("get_audit_log -> %s not found", _short(review_id))
             return {"error": f"Review not found: {review_id}"}
 
         cursor = await app.db.execute(
@@ -1014,6 +1192,11 @@ async def get_audit_log(
     result: dict = {"events": events, "count": len(events)}
     if review_id is not None:
         result["review_id"] = review_id
+    logger.info(
+        "get_audit_log -> %s events (review=%s)",
+        len(events),
+        _short(review_id) if review_id is not None else "all",
+    )
     return result
 
 
@@ -1025,7 +1208,7 @@ async def get_review_stats(ctx: Context = None) -> dict:
     average time-to-verdict, average review duration, and average time
     in each state.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     # Query 1: Status counts (COALESCE ensures 0 instead of NULL on empty table)
     cursor = await app.db.execute("""
@@ -1115,7 +1298,7 @@ async def get_review_stats(ctx: Context = None) -> dict:
         if state_key not in avg_time_in_state:
             avg_time_in_state[state_key] = None
 
-    return {
+    result = {
         "total_reviews": counts["total"],
         "by_status": {
             "pending": counts["pending"],
@@ -1130,6 +1313,13 @@ async def get_review_stats(ctx: Context = None) -> dict:
         "avg_review_duration_seconds": round(avg_duration, 1) if avg_duration else None,
         "avg_time_in_state_seconds": avg_time_in_state,
     }
+    logger.info(
+        "get_review_stats -> total=%s approved=%s changes_requested=%s",
+        result["total_reviews"],
+        result["by_status"]["approved"],
+        result["by_status"]["changes_requested"],
+    )
+    return result
 
 
 @mcp.tool
@@ -1143,7 +1333,7 @@ async def get_review_timeline(
     verdicts, counter-patches, and closure. Each event includes
     its type, actor, status change, and timestamp.
     """
-    app: AppContext = ctx.lifespan_context
+    app: AppContext = _app_ctx(ctx)
 
     # Verify review exists
     cursor = await app.db.execute(
@@ -1152,6 +1342,7 @@ async def get_review_timeline(
     )
     row = await cursor.fetchone()
     if row is None:
+        logger.info("get_review_timeline -> %s not found", _short(review_id))
         return {"error": f"Review not found: {review_id}"}
 
     cursor = await app.db.execute(
@@ -1180,7 +1371,7 @@ async def get_review_timeline(
                 event["metadata"] = event_row["metadata"]
         events.append(event)
 
-    return {
+    result = {
         "review_id": review_id,
         "intent": row["intent"],
         "current_status": row["status"],
@@ -1188,3 +1379,9 @@ async def get_review_timeline(
         "events": events,
         "event_count": len(events),
     }
+    logger.info(
+        "get_review_timeline -> %s events=%s",
+        _short(review_id),
+        len(events),
+    )
+    return result

@@ -19,7 +19,7 @@ The CONTEXT.md decision to use "absolute ISO 8601 timestamps throughout" introdu
 
 ### Locked Decisions
 - Full activity feed by default -- show all reviews (active + recent completed), not just a summary dashboard
-- Filterable by status (pending, claimed, approved, rejected, closed) AND category (plan_review, code_review, handoff, verification)
+- Filterable by status (pending, claimed, approved, rejected, closed) AND category (plan_review, code_change, handoff, verification)
 - Absolute ISO 8601 timestamps throughout (not relative "3 min ago")
 - Each review in the feed includes a truncated preview of the most recent message, plus message count and last_message_at
 - Dedicated append-only `audit_events` table -- not derived from querying existing tables
@@ -173,7 +173,7 @@ FROM reviews r
 WHERE 1=1
   [AND r.status = ?]
   [AND r.category = ?]
-ORDER BY r.updated_at DESC
+ORDER BY r.updated_at DESC, r.id DESC
 ```
 
 **Why correlated subqueries over JOINs:** With small data volumes (stated in CONTEXT.md: "data volume is small per project"), correlated subqueries are simpler to read and produce the exact one-row-per-review output needed. A LEFT JOIN with GROUP BY would also work but is more complex for the same result.
@@ -486,7 +486,7 @@ async def get_activity_feed(
              ORDER BY m2.rowid DESC LIMIT 1) AS last_message_preview
         FROM reviews r
         {where_clause}
-        ORDER BY r.updated_at DESC""",
+        ORDER BY r.updated_at DESC, r.id DESC""",
         params,
     )
     rows = await cursor.fetchall()

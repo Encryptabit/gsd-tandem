@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
 - [x] **Phase 4: GSD Workflow Integration** - Checkpoint mechanisms in GSD commands, sub-agent proposals, configurable granularity
 - [ ] **Phase 5: Observability and Validation** - Real-time visibility into broker activity, audit log, end-to-end workflow validation
+- [ ] **Phase 6: Review Gate Enforcement** - Make broker a proper gate: skip_diff_validation for post-commit diffs, orchestrator-mediated review, executor simplification
 
 ## Phase Details
 
@@ -99,10 +100,24 @@ Plans:
 - [ ] 05-01-PLAN.md -- Audit infrastructure, observability tools (activity feed, audit log, stats, timeline), audit wiring
 - [ ] 05-02-PLAN.md -- Observability tool tests and end-to-end workflow validation
 
+### Phase 6: Review Gate Enforcement
+**Goal**: All code changes flow through the broker as a proper gate, with the orchestrator mediating review on behalf of subagents
+**Depends on**: Phase 5
+**Requirements**: GSDI-02, GSDI-03
+**Success Criteria** (what must be TRUE):
+  1. create_review supports skip_diff_validation for post-commit diffs that are already applied to the working tree
+  2. Executor subagents no longer reference broker tools directly; orchestrator handles all broker interaction
+  3. execute-phase orchestrator submits post-plan diffs to broker and waits for verdict before proceeding
+  4. CLAUDE.md documents the tandem review requirement for ad-hoc changes
+**Plans**: 1 plan
+
+Plans:
+- [ ] 06-01-PLAN.md -- skip_diff_validation flag, executor simplification, orchestrator review gate, CLAUDE.md rule
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -111,3 +126,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
 | 4. GSD Workflow Integration | 3/3 | Complete | 2026-02-17 |
 | 5. Observability and Validation | 0/2 | Not started | - |
+| 6. Review Gate Enforcement | 0/1 | Not started | - |
