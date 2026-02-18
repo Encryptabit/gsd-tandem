@@ -80,35 +80,43 @@ async def create_review(
     description: str | None = None,
     diff: str | None = None,
     review_id: str | None = None,
+    skip_diff_validation: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Create a new review or revise an existing one.
 
     **New review** (omit review_id): Creates a fresh review with the given intent,
-    description, and optional unified diff. Diffs are validated on submission.
+    description, and optional unified diff. Diffs are validated on submission
+    unless skip_diff_validation is True.
     Returns review_id and initial status.
 
     **Revision** (pass existing review_id): Resubmits a review that is in
     changes_requested state. Replaces intent, description, diff, and affected_files.
     Clears claimed_by and verdict_reason. Returns to pending status.
-    Revised diffs are also validated before persistence.
+    Revised diffs are also validated before persistence unless skip_diff_validation
+    is True.
+
+    Set skip_diff_validation=True for post-commit diffs that are already applied
+    to the working tree. The diff will be stored as-is for reviewer inspection,
+    and the persisted flag will cause claim_review to skip re-validation.
     """
     app: AppContext = _app_ctx(ctx)
 
     # Compute affected_files from diff if provided
     affected_files: str | None = None
     if diff is not None:
-        is_valid, error_detail = await validate_diff(diff, cwd=app.repo_root)
-        if not is_valid:
-            logger.info(
-                "create_review -> %s validation_failed (%s)",
-                _short(review_id),
-                _clip(error_detail or "no details"),
-            )
-            return {
-                "error": "Diff validation failed on submission. Diff does not apply cleanly.",
-                "validation_error": error_detail,
-            }
+        if not skip_diff_validation:
+            is_valid, error_detail = await validate_diff(diff, cwd=app.repo_root)
+            if not is_valid:
+                logger.info(
+                    "create_review -> %s validation_failed (%s)",
+                    _short(review_id),
+                    _clip(error_detail or "no details"),
+                )
+                return {
+                    "error": "Diff validation failed on submission. Diff does not apply cleanly.",
+                    "validation_error": error_detail,
+                }
         affected_files = extract_affected_files(diff)
 
     # --- Revision flow ---
@@ -180,8 +188,9 @@ async def create_review(
                 """INSERT INTO reviews (id, status, intent, description, diff,
                                         affected_files, agent_type, agent_role,
                                         phase, plan, task, priority, category,
+                                        skip_diff_validation,
                                         created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
                 (
                     new_review_id,
                     ReviewStatus.PENDING,
@@ -196,6 +205,7 @@ async def create_review(
                     task,
                     str(priority),
                     category,
+                    1 if skip_diff_validation else 0,
                 ),
             )
             await record_event(
@@ -348,7 +358,8 @@ async def claim_review(
         try:
             await app.db.execute("BEGIN IMMEDIATE")
             cursor = await app.db.execute(
-                "SELECT status, diff, intent, description, affected_files, category "
+                "SELECT status, diff, intent, description, affected_files, category, "
+                "skip_diff_validation "
                 "FROM reviews WHERE id = ?",
                 (review_id,),
             )
@@ -365,7 +376,9 @@ async def claim_review(
 
             # Validate diff inside write_lock (prevents wasted subprocess on concurrent claims)
             diff_text = row["diff"]
-            if diff_text:
+            # Check if diff validation was skipped at submission (post-commit diffs)
+            skip_validation = bool(row["skip_diff_validation"]) if row["skip_diff_validation"] is not None else False
+            if diff_text and not skip_validation:
                 is_valid, error_detail = await validate_diff(diff_text, cwd=app.repo_root)
                 if not is_valid:
                     await app.db.execute(

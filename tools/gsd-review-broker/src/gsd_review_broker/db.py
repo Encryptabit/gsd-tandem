@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 from fastmcp import FastMCP
@@ -16,6 +18,7 @@ from gsd_review_broker.notifications import NotificationBus
 
 DB_FILENAME = Path(".planning") / "codex_review_broker.sqlite3"
 logger = logging.getLogger("gsd_review_broker")
+_PROACTOR_CONNECTION_LOST_CALLBACK = "_ProactorBasePipeTransport._call_connection_lost"
 
 SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS reviews (
@@ -67,6 +70,8 @@ SCHEMA_MIGRATIONS: list[str] = [
     "ALTER TABLE reviews ADD COLUMN counter_patch_status TEXT",
     # Phase 4 migrations
     "ALTER TABLE reviews ADD COLUMN category TEXT",
+    # Phase 6 migrations
+    "ALTER TABLE reviews ADD COLUMN skip_diff_validation INTEGER NOT NULL DEFAULT 0",
     # Phase 5 migrations -- audit_events table
     """CREATE TABLE IF NOT EXISTS audit_events (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +126,58 @@ async def discover_repo_root() -> str | None:
     return None
 
 
+def _is_windows_proactor_reset_noise(context: dict[str, Any]) -> bool:
+    """Return True for known benign WinError 10054 asyncio shutdown noise."""
+    exception = context.get("exception")
+    if not isinstance(exception, ConnectionResetError):
+        return False
+
+    # Windows-specific socket reset code for forcibly closed remote endpoint.
+    if getattr(exception, "winerror", None) != 10054:
+        return False
+
+    message = context.get("message")
+    if isinstance(message, str) and _PROACTOR_CONNECTION_LOST_CALLBACK in message:
+        return True
+
+    handle = context.get("handle")
+    if handle is None:
+        return False
+
+    return _PROACTOR_CONNECTION_LOST_CALLBACK in repr(handle)
+
+
+def install_windows_proactor_noise_filter(
+    loop: asyncio.AbstractEventLoop,
+) -> Callable[[], None]:
+    """Suppress noisy Proactor callback reset traces on Windows.
+
+    Keeps existing exception-handler behavior for all other asyncio errors.
+    Returns a callable that restores the previous handler.
+    """
+    previous_handler = loop.get_exception_handler()
+
+    if os.name != "nt":
+        return lambda: None
+
+    def handler(current_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if _is_windows_proactor_reset_noise(context):
+            return
+
+        if previous_handler is not None:
+            previous_handler(current_loop, context)
+        else:
+            current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+    def restore() -> None:
+        if loop.get_exception_handler() is handler:
+            loop.set_exception_handler(previous_handler)
+
+    return restore
+
+
 def resolve_db_path(repo_root: str | None) -> Path:
     """Resolve the database path, preferring the git repo root over CWD."""
     if repo_root:
@@ -131,6 +188,8 @@ def resolve_db_path(repo_root: str | None) -> Path:
 @asynccontextmanager
 async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     """Initialize SQLite with WAL mode at server startup, clean up on shutdown."""
+    loop = asyncio.get_running_loop()
+    restore_exception_handler = install_windows_proactor_noise_filter(loop)
     repo_root = await discover_repo_root()
     db_path = resolve_db_path(repo_root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,5 +207,8 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     try:
         yield AppContext(db=db, repo_root=repo_root)
     finally:
-        await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        await db.close()
+        try:
+            await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            await db.close()
+        finally:
+            restore_exception_handler()
