@@ -26,6 +26,16 @@ Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelizat
 **If `state_exists` is false but `.planning/` exists:** Offer reconstruct or continue.
 
 When `parallelization` is false, plans within a wave execute sequentially.
+
+**Tandem config loading:**
+
+```bash
+TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+```
+
+When `TANDEM_ENABLED=true`, force `PARALLELIZATION=false` to ensure clean per-plan diffs. Log: "Tandem mode active -- wave parallelism disabled for clean per-plan diffs."
+
+This is necessary because `git diff ${PLAN_START_REF}..HEAD` must isolate exactly one plan's changes. Parallel plan execution would interleave commits from multiple plans, making per-plan diffs impossible to construct.
 </step>
 
 <step name="handle_branching">
@@ -134,6 +144,49 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    ```
 
 3. **Wait for all agents in wave to complete.**
+
+3a. **Per-plan review gate** (only when `TANDEM_ENABLED=true`):
+
+   For each completed plan in the wave (sequentially, since parallelism is forced off):
+
+   1. Record `PLAN_START_REF` before spawning the plan's executor (add this before step 2).
+      ```bash
+      PLAN_START_REF=$(git rev-parse HEAD)
+      ```
+   2. After executor returns, capture diff:
+      ```bash
+      PLAN_DIFF=$(git diff ${PLAN_START_REF}..HEAD)
+      ```
+   3. If `PLAN_DIFF` is empty, skip review gate for this plan.
+   4. Submit to broker:
+      ```
+      mcp__gsdreview__create_review(
+        intent="Plan {plan_id}: {plan_objective}",
+        agent_type="gsd-executor",
+        agent_role="proposer",
+        phase="{phase_number}",
+        plan="{plan_number}",
+        category="code_change",
+        diff=PLAN_DIFF,
+        skip_diff_validation=true
+      )
+      ```
+   5. Long-poll for verdict:
+      ```
+      Loop:
+        status = mcp__gsdreview__get_review_status(review_id=ID, wait=true)
+        - approved: mcp__gsdreview__close_review(review_id=ID), proceed
+        - changes_requested: Read verdict_reason, log feedback.
+          Hard-reset to clean state:
+            git reset --hard ${PLAN_START_REF}
+          This is safe because the work was rejected and the executor will
+          redo it from scratch with feedback.
+          Re-spawn executor with verdict_reason appended to its prompt.
+          Return to step 3a.2 for the re-executed plan.
+      ```
+   6. On broker connection failure on first call: warn and set `TANDEM_ENABLED=false`
+      for remainder of execution (solo mode fallback). Log:
+      "Review broker unreachable. Falling back to solo mode for this session."
 
 4. **Report completion — spot-check claims first:**
 
