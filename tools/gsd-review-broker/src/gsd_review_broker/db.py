@@ -492,7 +492,7 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 
     pool: ReviewerPool | None = None
     try:
-        spawn_config = load_spawn_config(config_path)
+        spawn_config = load_spawn_config(config_path, repo_root=repo_root)
     except FileNotFoundError:
         logger.info("No config file, reviewer pool disabled (%s)", config_path)
     except Exception as exc:

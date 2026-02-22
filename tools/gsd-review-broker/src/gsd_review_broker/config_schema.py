@@ -53,6 +53,9 @@ class SpawnConfig(BaseModel):
     @field_validator("workspace_path")
     @classmethod
     def _validate_workspace_path(cls, value: str) -> str:
+        # "auto" is resolved later by load_spawn_config once repo root is known.
+        if value == "auto":
+            return value
         # WSL-style paths are not resolvable from native Windows Python runtime.
         if os.name == "nt":
             return value
@@ -61,8 +64,15 @@ class SpawnConfig(BaseModel):
         return value
 
 
-def load_spawn_config(config_path: str | Path) -> SpawnConfig | None:
+def load_spawn_config(
+    config_path: str | Path,
+    repo_root: str | None = None,
+) -> SpawnConfig | None:
     """Load reviewer pool config from .planning/config.json.
+
+    When ``workspace_path`` is ``"auto"``, it is resolved to *repo_root*
+    (the git repository root discovered at startup).  This makes the config
+    portable across Windows-hosted WSL and native Linux environments.
 
     Returns:
     - None when the reviewer_pool section is missing (pool disabled).
@@ -86,4 +96,18 @@ def load_spawn_config(config_path: str | Path) -> SpawnConfig | None:
         return None
     if not isinstance(section, dict):
         raise ValueError("reviewer_pool must be an object when provided")
-    return SpawnConfig.model_validate(section)
+
+    config = SpawnConfig.model_validate(section)
+
+    # Resolve "auto" workspace_path to the discovered repo root.
+    if config.workspace_path == "auto":
+        if repo_root is None:
+            raise ValueError(
+                'workspace_path is "auto" but no git repository root was discovered'
+            )
+        resolved = str(Path(repo_root).resolve())
+        if os.name != "nt" and not Path(resolved).exists():
+            raise ValueError(f"resolved workspace_path does not exist: {resolved}")
+        config.workspace_path = resolved
+
+    return config

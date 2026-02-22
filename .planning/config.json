@@ -8,7 +8,7 @@
   "review_granularity": "per_task",
   "execution_mode": "blocking",
   "reviewer_pool": {
-    "workspace_path": "/mnt/c/Projects/gsd-tandem",
+    "workspace_path": "auto",
     "model": "gpt-5.3-codex",
     "reasoning_effort": "high",
     "wsl_distro": "Ubuntu",

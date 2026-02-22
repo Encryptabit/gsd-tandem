@@ -4,10 +4,10 @@
       "type": "http",
       "url": "http://0.0.0.0:8321/mcp"
     },
-    "codex-wsl": {
+    "codex": {
       "type": "stdio",
-      "command": "wsl",
-      "args": ["--", "codex", "mcp-server"]
+      "command": "codex",
+      "args": ["mcp-server"]
     }
   }
 }
