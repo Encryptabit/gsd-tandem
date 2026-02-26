@@ -905,6 +905,17 @@ function canonicalizePhase(value) {
   return `${major}.${minor}`;
 }
 
+function phaseRegexFragment(value) {
+  const canonical = canonicalizePhase(value);
+  if (!canonical) return String(value ?? '');
+  const match = canonical.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) return canonical;
+  const major = match[1];
+  if (!match[2]) return `0*${major}`;
+  const minor = match[2];
+  return `0*${major}\\.0*${minor}`;
+}
+
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf-8').digest('hex');
 }
@@ -3630,11 +3641,11 @@ function cmdRoadmapUpdatePlanProgress(cwd, phaseNum, raw) {
   }
 
   let roadmapContent = fs.readFileSync(roadmapPath, 'utf-8');
-  const phaseEscaped = phaseNum.replace('.', '\\.');
+  const phasePattern = phaseRegexFragment(phaseInfo.phase_number || phaseNum);
 
   // Progress table row: update Plans column (summaries/plans) and Status column
   const tablePattern = new RegExp(
-    `(\\|\\s*${phaseEscaped}\\.?\\s[^|]*\\|)[^|]*(\\|)\\s*[^|]*(\\|)\\s*[^|]*(\\|)`,
+    `(\\|\\s*${phasePattern}\\.?\\s[^|]*\\|)[^|]*(\\|)\\s*[^|]*(\\|)\\s*[^|]*(\\|)`,
     'i'
   );
   const dateField = isComplete ? ` ${today} ` : '  ';
@@ -3645,7 +3656,7 @@ function cmdRoadmapUpdatePlanProgress(cwd, phaseNum, raw) {
 
   // Update plan count in phase detail section
   const planCountPattern = new RegExp(
-    `(#{2,4}\\s*Phase\\s+${phaseEscaped}[\\s\\S]*?\\*\\*Plans:\\*\\*\\s*)[^\\n]+`,
+    `(#{2,4}\\s*Phase\\s+${phasePattern}[\\s\\S]*?\\*\\*Plans:\\*\\*\\s*)[^\\n]+`,
     'i'
   );
   const planCountText = isComplete
@@ -3656,7 +3667,7 @@ function cmdRoadmapUpdatePlanProgress(cwd, phaseNum, raw) {
   // If complete: check checkbox
   if (isComplete) {
     const checkboxPattern = new RegExp(
-      `(-\\s*\\[)[ ](\\]\\s*.*Phase\\s+${phaseEscaped}[:\\s][^\\n]*)`,
+      `(-\\s*\\[)[ ](\\]\\s*.*Phase\\s+${phasePattern}[:\\s][^\\n]*)`,
       'i'
     );
     roadmapContent = roadmapContent.replace(checkboxPattern, `$1x$2 (completed ${today})`);
@@ -3704,18 +3715,18 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
   // Update ROADMAP.md: mark phase complete
   if (fs.existsSync(roadmapPath)) {
     let roadmapContent = fs.readFileSync(roadmapPath, 'utf-8');
+    const phasePattern = phaseRegexFragment(phaseInfo.phase_number || phaseNum);
 
     // Checkbox: - [ ] Phase N: → - [x] Phase N: (...completed DATE)
     const checkboxPattern = new RegExp(
-      `(-\\s*\\[)[ ](\\]\\s*.*Phase\\s+${phaseNum.replace('.', '\\.')}[:\\s][^\\n]*)`,
+      `(-\\s*\\[)[ ](\\]\\s*.*Phase\\s+${phasePattern}[:\\s][^\\n]*)`,
       'i'
     );
     roadmapContent = roadmapContent.replace(checkboxPattern, `$1x$2 (completed ${today})`);
 
     // Progress table: update Status to Complete, add date
-    const phaseEscaped = phaseNum.replace('.', '\\.');
     const tablePattern = new RegExp(
-      `(\\|\\s*${phaseEscaped}\\.?\\s[^|]*\\|[^|]*\\|)\\s*[^|]*(\\|)\\s*[^|]*(\\|)`,
+      `(\\|\\s*${phasePattern}\\.?\\s[^|]*\\|[^|]*\\|)\\s*[^|]*(\\|)\\s*[^|]*(\\|)`,
       'i'
     );
     roadmapContent = roadmapContent.replace(
@@ -3725,7 +3736,7 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
 
     // Update plan count in phase section
     const planCountPattern = new RegExp(
-      `(#{2,4}\\s*Phase\\s+${phaseEscaped}[\\s\\S]*?\\*\\*Plans:\\*\\*\\s*)[^\\n]+`,
+      `(#{2,4}\\s*Phase\\s+${phasePattern}[\\s\\S]*?\\*\\*Plans:\\*\\*\\s*)[^\\n]+`,
       'i'
     );
     roadmapContent = roadmapContent.replace(
@@ -3740,7 +3751,7 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
     if (fs.existsSync(reqPath)) {
       // Extract Requirements line from roadmap for this phase
       const reqMatch = roadmapContent.match(
-        new RegExp(`Phase\\s+${phaseNum.replace('.', '\\.')}[\\s\\S]*?\\*\\*Requirements:\\*\\*\\s*([^\\n]+)`, 'i')
+        new RegExp(`Phase\\s+${phasePattern}[\\s\\S]*?\\*\\*Requirements:\\*\\*\\s*([^\\n]+)`, 'i')
       );
 
       if (reqMatch) {

@@ -1755,6 +1755,82 @@ describe('phase complete command', () => {
     assert.ok(roadmap.includes('completed'), 'completion date should be added');
   });
 
+  test('checks roadmap phase when command uses padded phase but roadmap uses unpadded number', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap
+
+- [ ] Phase 2: Class type analysis
+- [ ] Phase 3: Markdown generation
+
+### Phase 2: Class type analysis
+**Goal:** Analyze classes
+**Plans:** 1 plans
+
+### Phase 3: Markdown generation
+**Goal:** Generate markdown
+`
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `# State\n\n**Current Phase:** 02\n**Current Phase Name:** Class type analysis\n**Status:** In progress\n**Current Plan:** 02-01\n`
+    );
+
+    const p2 = path.join(tmpDir, '.planning', 'phases', '02-class-type-analysis');
+    fs.mkdirSync(p2, { recursive: true });
+    fs.writeFileSync(path.join(p2, '02-01-PLAN.md'), '# Plan');
+    fs.writeFileSync(path.join(p2, '02-01-SUMMARY.md'), '# Summary');
+
+    approveExecuteGate('2');
+    const result = runGsdTools('phase complete 02', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const roadmap = fs.readFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), 'utf-8');
+    assert.ok(
+      roadmap.includes('- [x] Phase 2: Class type analysis'),
+      'phase 2 checkbox should be checked even when command uses 02'
+    );
+    assert.ok(roadmap.includes('(completed '), 'completion date should be appended');
+  });
+
+  test('checks roadmap phase when command uses unpadded phase but roadmap uses padded number', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap
+
+- [ ] Phase 02: Foundation
+- [ ] Phase 03: API
+
+### Phase 02: Foundation
+**Goal:** Setup
+**Plans:** 1 plans
+
+### Phase 03: API
+**Goal:** Build API
+`
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `# State\n\n**Current Phase:** 02\n**Current Phase Name:** Foundation\n**Status:** In progress\n**Current Plan:** 02-01\n`
+    );
+
+    const p2 = path.join(tmpDir, '.planning', 'phases', '02-foundation');
+    fs.mkdirSync(p2, { recursive: true });
+    fs.writeFileSync(path.join(p2, '02-01-PLAN.md'), '# Plan');
+    fs.writeFileSync(path.join(p2, '02-01-SUMMARY.md'), '# Summary');
+
+    approveExecuteGate('2');
+    const result = runGsdTools('phase complete 2', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const roadmap = fs.readFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), 'utf-8');
+    assert.ok(
+      roadmap.includes('- [x] Phase 02: Foundation'),
+      'phase 02 checkbox should be checked even when command uses 2'
+    );
+    assert.ok(roadmap.includes('(completed '), 'completion date should be appended');
+  });
+
   test('transitions to next roadmap phase even when next phase directory is missing', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
