@@ -78,8 +78,12 @@ def register_dashboard_routes(mcp: object) -> None:
         asset_path = (DIST_DIR / asset_path_str).resolve()
 
         # Security: prevent path traversal outside dist directory.
+        # Use Path.is_relative_to() for strict containment — avoids prefix
+        # matching bugs where sibling dirs (e.g. dist-backup/) pass.
         dist_resolved = DIST_DIR.resolve()
-        if not str(asset_path).startswith(str(dist_resolved)):
+        try:
+            asset_path.relative_to(dist_resolved)
+        except ValueError:
             return PlainTextResponse("Not found", status_code=404)
 
         if not asset_path.is_file():

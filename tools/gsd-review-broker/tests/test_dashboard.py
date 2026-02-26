@@ -96,6 +96,29 @@ def test_dashboard_path_traversal_blocked(client):
         assert resp.status_code == 404, f"Path traversal not blocked for {path}"
 
 
+def test_dashboard_sibling_directory_boundary(client, tmp_path):
+    """Strict directory-boundary check blocks sibling dirs with same prefix.
+
+    A naive startswith() guard could let e.g. /dashboard/dist-backup/secret
+    pass if a sibling directory shares the dist prefix. The relative_to()
+    guard rejects any resolved path not strictly inside DIST_DIR.
+    """
+    # Create a sibling directory that shares the dist prefix
+    sibling = tmp_path / "dist-evil"
+    sibling.mkdir()
+    secret = sibling / "secret.txt"
+    secret.write_text("leaked")
+
+    # Point DIST_DIR to tmp_path/dist (which doesn't need to exist for this test)
+    fake_dist = tmp_path / "dist"
+    fake_dist.mkdir()
+
+    with patch.object(dashboard, "DIST_DIR", fake_dist):
+        # Attempt to reach the sibling directory through the catch-all route
+        resp = client.get("/dashboard/../dist-evil/secret.txt")
+        assert resp.status_code == 404, "Sibling directory traversal should be blocked"
+
+
 # ---- SSE endpoint tests ----
 
 
