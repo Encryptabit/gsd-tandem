@@ -34,6 +34,7 @@ let searchQuery: string = '';
 let autoScroll: boolean = true;
 let tailEventSource: EventSource | null = null;
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let tailIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
 function escapeHtml(text: string): string {
   const div = document.createElement('div');
@@ -257,13 +258,28 @@ async function loadFile(filename: string): Promise<void> {
   }
 }
 
+function setTailDotState(state: 'active' | 'idle' | 'paused'): void {
+  const dot = document.getElementById('log-tail-dot');
+  if (dot) {
+    dot.className = 'tail-dot tail-dot-' + state;
+  }
+}
+
+function scheduleTailIdle(): void {
+  if (tailIdleTimer) clearTimeout(tailIdleTimer);
+  tailIdleTimer = setTimeout(function() {
+    // Only fade to idle if tail is still active (not paused/stopped)
+    if (tailActive && tailEventSource) {
+      setTailDotState('idle');
+    }
+  }, 3000);
+}
+
 function startTail(filename: string): void {
   stopTail();
 
-  const dot = document.getElementById('log-tail-dot');
-  if (dot) {
-    dot.className = 'tail-dot tail-dot-active';
-  }
+  // Start in idle state -- will pulse only when entries arrive
+  setTailDotState('idle');
 
   try {
     tailEventSource = new EventSource('/dashboard/events?tail=' + encodeURIComponent(filename));
@@ -271,9 +287,13 @@ function startTail(filename: string): void {
     tailEventSource.onmessage = function(event) {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'log_tail' && Array.isArray(data.entries)) {
+        if (data.type === 'log_tail' && Array.isArray(data.entries) && data.entries.length > 0) {
           const logOutput = document.getElementById('log-output');
           if (!logOutput) return;
+
+          // Flash dot to active (pulsing) when entries arrive
+          setTailDotState('active');
+          scheduleTailIdle();
 
           for (let i = 0; i < data.entries.length; i++) {
             const entry = data.entries[i] as LogEntry;
@@ -294,37 +314,32 @@ function startTail(filename: string): void {
     };
 
     tailEventSource.onerror = function() {
-      if (dot) {
-        dot.className = 'tail-dot tail-dot-idle';
-      }
+      setTailDotState('idle');
     };
 
     tailEventSource.onopen = function() {
-      if (dot) {
-        dot.className = 'tail-dot tail-dot-active';
-      }
+      // Connected but no entries yet -- stay idle until data arrives
+      setTailDotState('idle');
     };
   } catch {
-    if (dot) {
-      dot.className = 'tail-dot tail-dot-idle';
-    }
+    setTailDotState('idle');
   }
 }
 
 function stopTail(): void {
+  if (tailIdleTimer) {
+    clearTimeout(tailIdleTimer);
+    tailIdleTimer = null;
+  }
   if (tailEventSource) {
     tailEventSource.close();
     tailEventSource = null;
   }
-  const dot = document.getElementById('log-tail-dot');
-  if (dot) {
-    dot.className = 'tail-dot tail-dot-idle';
-  }
+  setTailDotState('idle');
 }
 
 function handleTailToggle(): void {
   tailActive = !tailActive;
-  const dot = document.getElementById('log-tail-dot');
   const label = document.getElementById('log-tail-label');
 
   if (tailActive) {
@@ -334,9 +349,7 @@ function handleTailToggle(): void {
     }
   } else {
     stopTail();
-    if (dot) {
-      dot.className = 'tail-dot tail-dot-paused';
-    }
+    setTailDotState('paused');
     if (label) label.textContent = 'Tail Paused';
   }
 }

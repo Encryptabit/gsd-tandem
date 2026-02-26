@@ -458,10 +458,10 @@ def register_dashboard_routes(mcp: object) -> None:
                 except Exception:
                     logger.exception("Failed to build initial overview data for SSE")
 
-                tick = 0
+                loop = asyncio.get_event_loop()
+                last_overview_time = loop.time()
                 while True:
                     await asyncio.sleep(SSE_LOG_TAIL_INTERVAL)
-                    tick += SSE_LOG_TAIL_INTERVAL
 
                     # Check for log tail updates every SSE_LOG_TAIL_INTERVAL seconds
                     if tail_filename and tail_pos is not None:
@@ -500,8 +500,9 @@ def register_dashboard_routes(mcp: object) -> None:
                             pass  # File access error, skip this tick
 
                     # Push overview update every SSE_HEARTBEAT_INTERVAL seconds
-                    if tick >= SSE_HEARTBEAT_INTERVAL:
-                        tick = 0
+                    now = loop.time()
+                    if now - last_overview_time >= SSE_HEARTBEAT_INTERVAL:
+                        last_overview_time = now
                         try:
                             overview_data = await _build_overview_data()
                             overview_data["type"] = "overview_update"
