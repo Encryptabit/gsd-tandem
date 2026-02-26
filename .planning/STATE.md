@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 ## Current Position
 
 Phase: 8 of 12 (Dashboard Shell and Infrastructure)
-Plan: Re-planning (Astro pivot)
-Status: Re-planning — previous inline HTML/CSS/JS implementation scrapped in favor of Astro static site generator
-Last activity: 2026-02-26 — Pivoted to Astro framework, updated CONTEXT, removed old plans
+Plan: 1 of 2 complete
+Status: Executing — Plan 08-01 (Astro shell) complete, Plan 08-02 (static serving) pending
+Last activity: 2026-02-26 — Completed 08-01-PLAN.md (dashboard shell and infrastructure)
 
-Progress: [===================.............] 58% (v1.0 complete, v1.1 phase 8 re-planning)
+Progress: [====================............] 62% (v1.0 complete, v1.1 phase 8 plan 1/2 done)
 
 ## Performance Metrics
 
@@ -25,6 +25,7 @@ Progress: [===================.............] 58% (v1.0 complete, v1.1 phase 8 re
 
 **v1.1 Velocity:**
 - Previous 08-01 and 08-02 implementations scrapped (inline HTML approach abandoned)
+- 08-01 (Astro shell): 5 min, 2 tasks, 16 files
 
 ## Accumulated Context
 
@@ -38,6 +39,9 @@ v1.1 decisions:
 - Python broker serves built static files at `/dashboard`, SSE endpoint stays in Python
 - Built `dist/` committed to repo — no Node.js needed at runtime, only at build time
 - register_*_routes(mcp) pattern for modular route registration (unchanged)
+- is:global CSS for ThemeToggle (Astro scoped CSS cannot reach html[data-theme] from child component)
+- SSE singleton on window.gsdSSE for cross-script EventSource sharing
+- Custom event bus (sse-status events) for decoupled component communication
 
 Key v1.0 decisions carried forward:
 
@@ -68,5 +72,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Pivoted Phase 8 to Astro framework. Old inline implementation scrapped.
-Resume notes: Re-planning Phase 8 with Astro. CONTEXT updated. Need to delete old dashboard.py/test_dashboard.py, remove old plan summaries, and run /gsd:plan-phase.
+Stopped at: Completed 08-01-PLAN.md (Astro dashboard shell with design system, sidebar nav, theme toggle, tabs, SSE)
+Resume notes: Execute 08-02-PLAN.md next (Python static file serving and SSE endpoint wiring).
