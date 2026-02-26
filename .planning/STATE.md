@@ -51,4 +51,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Milestone v1.1 initialization
+Stopped at: Milestone v1.1 — step 9 (Define Requirements)
+Resume notes: PROJECT.md updated, STATE.md reset, research skipped. Next: define requirements then create roadmap. Use /gsd:new-milestone to resume — it will detect existing PROJECT.md with v1.1 milestone section and pick up at requirements.
