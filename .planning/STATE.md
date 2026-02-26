@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Milestone v1.1 — Phase 8: Dashboard Shell and Infrastructure (Astro migration)
+**Current focus:** Milestone v1.1 — Phase 9: Overview Tab
 
 ## Current Position
 
@@ -76,5 +76,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 08-02-PLAN.md (Python static file serving + SSE endpoint + dashboard route tests)
-Resume notes: Phase 8 complete. Plan Phase 9 next (Overview tab with status, stats, active reviewers).
+Stopped at: Phase 9 context gathered
+Resume notes: Phase 9 context captured (09-CONTEXT.md). Plan Phase 9 next (Overview tab with status, stats, active reviewers).
