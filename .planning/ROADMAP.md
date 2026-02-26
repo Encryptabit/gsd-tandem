@@ -2,7 +2,12 @@
 
 ## Overview
 
-GSD Tandem delivers a local MCP review broker that intercepts every meaningful change Claude makes -- plans, code, verification artifacts -- and routes it through a reviewer (Codex, another Claude instance, or a human) before it gets applied. The roadmap progresses from a working broker server with basic propose/approve flow, through rich discussion and diff protocol, configurable interaction modes, GSD workflow integration, and finally observability and end-to-end validation. Each phase delivers a complete, testable capability that builds on the previous one.
+GSD Tandem delivers a local MCP review broker that intercepts every meaningful change Claude makes -- plans, code, verification artifacts -- and routes it through a reviewer (Codex, another Claude instance, or a human) before it gets applied. v1.0 established the core broker with full review lifecycle, GSD workflow integration, and reviewer pool management. v1.1 adds a web dashboard embedded in the broker server, giving users real-time visual insight into broker activity, review history, reviewer pool status, and structured logs without leaving their browser.
+
+## Milestones
+
+- Complete **v1.0 Core Broker** - Phases 1-7 (shipped 2026-02-18)
+- Active **v1.1 Web Dashboard** - Phases 8-12 (in progress)
 
 ## Phases
 
@@ -12,6 +17,9 @@ GSD Tandem delivers a local MCP review broker that intercepts every meaningful c
 
 Decimal phases appear between their surrounding integers in numeric order.
 
+<details>
+<summary>Complete: v1.0 Core Broker (Phases 1-7) - SHIPPED 2026-02-18</summary>
+
 - [x] **Phase 1: Core Broker Server** - SQLite-backed FastMCP server with state machine, basic propose/claim/verdict lifecycle
 - [x] **Phase 2: Proposal and Diff Protocol** - Full proposal creation with unified diffs, verdict submission, conflict detection
 - [x] **Phase 3: Discussion and Patches** - Multi-round threaded conversation, counter-patches, priority levels, push notifications
@@ -20,7 +28,20 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Review Gate Enforcement** - Make broker a proper gate: skip_diff_validation for post-commit diffs, orchestrator-mediated review, executor simplification
 - [x] **Phase 7: Add Reviewer Lifecycle Management to Broker** - Broker-internal subprocess spawning, auto-scaling pool, fenced reclaim, lifecycle audit
 
+</details>
+
+### v1.1 Web Dashboard
+
+- [ ] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker
+- [ ] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list
+- [ ] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail
+- [ ] **Phase 11: Review Browser Tab** - Review list with filtering, detail view with diffs and verdicts, discussion threads
+- [ ] **Phase 12: Pool Management Tab** - Reviewer subprocess status display and aggregate token usage tracking
+
 ## Phase Details
+
+<details>
+<summary>Complete: v1.0 Core Broker (Phases 1-7)</summary>
 
 ### Phase 1: Core Broker Server
 **Goal**: A proposer and reviewer can connect to the broker, create a review, claim it, and reach a terminal state (approved/rejected/closed) via polling
@@ -136,17 +157,78 @@ Plans:
 - [x] 07-03-PLAN.md -- Fenced reclaim: claim_generation fence tokens, claimed_at timestamps, stale verdict rejection
 - [x] 07-04-PLAN.md -- Auto-scaling, background tasks, MCP tools (spawn/kill/list), lifespan integration, stale session recovery
 
+</details>
+
+### Phase 8: Dashboard Shell and Infrastructure
+**Goal**: User can open a web dashboard in their browser served directly from the running broker, with a tabbed navigation shell ready for feature tabs
+**Depends on**: Phase 7 (broker must be running)
+**Requirements**: DASH-01, DASH-02
+**Success Criteria** (what must be TRUE):
+  1. User can navigate to http://127.0.0.1:{port}/dashboard in a browser and see a styled HTML page served by the broker process
+  2. Dashboard displays a tab navigation bar with placeholder tabs (Overview, Logs, Reviews, Pool) that switch visible content areas
+  3. Dashboard loads without any external CDN or network dependencies -- all assets are self-contained
+  4. Dashboard page is visually polished with a distinctive, production-grade interface (DASH-02 frontend-design skill applied throughout all phases)
+**Plans**: TBD
+
+**Note**: DASH-02 (frontend-design skill) is a cross-cutting process requirement applied during all dashboard phases, not a standalone deliverable. It is assigned here as its home phase but its quality standard applies to phases 9-12 as well.
+
+### Phase 9: Overview Tab
+**Goal**: User can see at a glance whether the broker is healthy, how reviews are performing, and which reviewers are active
+**Depends on**: Phase 8
+**Requirements**: OVER-01, OVER-02, OVER-03
+**Success Criteria** (what must be TRUE):
+  1. Dashboard displays broker status including server address, uptime, version, and key configuration settings from config.json
+  2. Dashboard displays aggregate review statistics (total reviews, approval rate, average review time) populated from the same data as get_review_stats
+  3. Dashboard displays a list of active reviewer subprocesses showing each reviewer's status, current review assignment, and per-reviewer stats (reviews completed, uptime)
+**Plans**: TBD
+
+### Phase 10: Log Viewer Tab
+**Goal**: User can browse historical log files and watch new log entries appear in real-time without leaving the dashboard
+**Depends on**: Phase 8
+**Requirements**: LOGS-01, LOGS-02
+**Success Criteria** (what must be TRUE):
+  1. Dashboard lists available JSONL log files from both broker-logs/ and reviewer-logs/ directories with file names, sizes, and modification timestamps
+  2. User can select a log file and view its entries rendered as a readable, scrollable list (not raw JSON)
+  3. User can activate a live tail mode that streams new log entries into the view as they are written to disk, without manual refresh
+**Plans**: TBD
+
+### Phase 11: Review Browser Tab
+**Goal**: User can navigate the full history of reviews, inspect any review's diff and metadata, and read the complete discussion thread
+**Depends on**: Phase 8
+**Requirements**: REVW-01, REVW-02, REVW-03
+**Success Criteria** (what must be TRUE):
+  1. Dashboard displays a sortable, filterable list of reviews with columns for status, category, priority, agent identity, and timestamps
+  2. User can click a review to see its detail view showing intent description, unified diff (rendered readably), verdict history, and metadata
+  3. User can view the full discussion thread for any review, showing all messages in chronological order with sender identity and timestamps
+  4. User can filter reviews by status (pending, approved, rejected, closed) and by category to find specific reviews quickly
+**Plans**: TBD
+
+### Phase 12: Pool Management Tab
+**Goal**: User can monitor the reviewer pool health and understand token consumption across all reviewer subprocesses
+**Depends on**: Phase 8, Phase 9 (builds on reviewer data patterns from Overview)
+**Requirements**: POOL-01, POOL-02
+**Success Criteria** (what must be TRUE):
+  1. Dashboard displays each reviewer subprocess with its status, reviews completed count, uptime, and current review assignment (if any)
+  2. Dashboard displays aggregate token usage accumulated across all reviewer subprocesses over the broker's lifetime
+  3. Token usage data is collected from Codex reviewer subprocesses and persisted so it survives broker restarts
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Core Broker Server | 3/3 | Complete | 2026-02-16 |
-| 2. Proposal and Diff Protocol | 2/2 | Complete | 2026-02-17 |
-| 3. Discussion and Patches | 2/2 | Complete | 2026-02-17 |
-| 4. GSD Workflow Integration | 3/3 | Complete | 2026-02-17 |
-| 5. Observability and Validation | 2/2 | Complete | 2026-02-18 |
-| 6. Review Gate Enforcement | 1/1 | Complete | 2026-02-18 |
-| 7. Reviewer Lifecycle Management | 4/4 | Complete | 2026-02-18 |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Core Broker Server | v1.0 | 3/3 | Complete | 2026-02-16 |
+| 2. Proposal and Diff Protocol | v1.0 | 2/2 | Complete | 2026-02-17 |
+| 3. Discussion and Patches | v1.0 | 2/2 | Complete | 2026-02-17 |
+| 4. GSD Workflow Integration | v1.0 | 3/3 | Complete | 2026-02-17 |
+| 5. Observability and Validation | v1.0 | 2/2 | Complete | 2026-02-18 |
+| 6. Review Gate Enforcement | v1.0 | 1/1 | Complete | 2026-02-18 |
+| 7. Reviewer Lifecycle Management | v1.0 | 4/4 | Complete | 2026-02-18 |
+| 8. Dashboard Shell and Infrastructure | v1.1 | 0/? | Not started | - |
+| 9. Overview Tab | v1.1 | 0/? | Not started | - |
+| 10. Log Viewer Tab | v1.1 | 0/? | Not started | - |
+| 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
+| 12. Pool Management Tab | v1.1 | 0/? | Not started | - |

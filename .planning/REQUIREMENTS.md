@@ -58,7 +58,7 @@
 
 ## v1.1 Requirements
 
-Requirements for Web Dashboard milestone. Each maps to roadmap phases 8+.
+Requirements for Web Dashboard milestone. Each maps to roadmap phases 8-12.
 
 ### Dashboard Infrastructure
 
@@ -155,13 +155,25 @@ Requirements for Web Dashboard milestone. Each maps to roadmap phases 8+.
 | RLMC-06 | Phase 7 | Complete |
 | RLMC-07 | Phase 7 | Complete |
 | RLMC-08 | Phase 7 | Complete |
+| DASH-01 | Phase 8 | Pending |
+| DASH-02 | Phase 8 | Pending |
+| OVER-01 | Phase 9 | Pending |
+| OVER-02 | Phase 9 | Pending |
+| OVER-03 | Phase 9 | Pending |
+| LOGS-01 | Phase 10 | Pending |
+| LOGS-02 | Phase 10 | Pending |
+| REVW-01 | Phase 11 | Pending |
+| REVW-02 | Phase 11 | Pending |
+| REVW-03 | Phase 11 | Pending |
+| POOL-01 | Phase 12 | Pending |
+| POOL-02 | Phase 12 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 33 total (31 complete, 2 pending)
-- v1.1 requirements: 12 total
-- Mapped to phases: 33 (v1.1 mapping pending roadmap creation)
-- Unmapped: 12 (v1.1 — will be mapped during roadmap creation)
+- v1.1 requirements: 12 total (0 complete, 12 pending)
+- Mapped to phases: 45/45
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-25 after v1.1 requirements definition*
+*Last updated: 2026-02-25 after v1.1 roadmap creation*
