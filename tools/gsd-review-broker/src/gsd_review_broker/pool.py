@@ -60,6 +60,20 @@ def _utc_timestamp() -> str:
     )
 
 
+def _normalize_project_key(project: str | None) -> str:
+    if project is None:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", "", project.strip().lower())
+    return normalized
+
+
+def _looks_like_absolute_path(value: str) -> bool:
+    if Path(value).is_absolute():
+        return True
+    # Cross-platform support: Windows drive paths from Linux-hosted broker.
+    return re.match(r"^[A-Za-z]:[\\/]", value) is not None
+
+
 def _read_positive_int_env(name: str, default: int, minimum: int) -> int:
     raw = os.environ.get(name)
     if raw is None:
@@ -147,6 +161,8 @@ class ReviewerPool:
     _draining: set[str] = field(default_factory=set)
     _log_writers: dict[str, _JsonlRotatingWriter] = field(default_factory=dict)
     _stream_tasks: dict[str, list[asyncio.Task[None]]] = field(default_factory=dict)
+    _project_scopes: dict[str, str | None] = field(default_factory=dict)
+    _workspace_paths: dict[str, str] = field(default_factory=dict)
     _spawn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _last_spawn_time: float = 0.0
 
@@ -162,6 +178,72 @@ class ReviewerPool:
     def is_draining(self, reviewer_id: str) -> bool:
         """Return True when reviewer is in drain mode."""
         return reviewer_id in self._draining
+
+    def _normalize_scope(self, project: str | None) -> str:
+        return _normalize_project_key(project)
+
+    def resolve_workspace_path(self, project: str | None = None) -> str:
+        """Resolve the workspace path for a project-scoped reviewer.
+
+        Resolution order:
+        1) Absolute project path (if provided and exists)
+        2) `workspace_path/<project>` direct child match
+        3) Case-insensitive child directory match
+        4) Slug-normalized child directory match (e.g. code2obsidian -> Code2Obsidian)
+        5) Base workspace_path fallback
+        """
+        base = Path(self.config.workspace_path).expanduser()
+        if project is None or project.strip() == "":
+            return str(base)
+
+        token = project.strip()
+        project_path = Path(token).expanduser()
+        if _looks_like_absolute_path(token) and project_path.exists():
+            return str(project_path)
+
+        direct = base / token
+        if direct.exists() and direct.is_dir():
+            return str(direct)
+
+        if base.exists() and base.is_dir():
+            children = [child for child in base.iterdir() if child.is_dir()]
+            for child in children:
+                if child.name.lower() == token.lower():
+                    return str(child)
+            token_key = _normalize_project_key(token)
+            for child in children:
+                if _normalize_project_key(child.name) == token_key:
+                    return str(child)
+
+        if _normalize_project_key(base.name) == _normalize_project_key(token):
+            return str(base)
+
+        return str(base)
+
+    def project_scope_for(self, reviewer_id: str) -> str | None:
+        return self._project_scopes.get(reviewer_id)
+
+    def workspace_path_for(self, reviewer_id: str) -> str | None:
+        return self._workspace_paths.get(reviewer_id)
+
+    def active_count_for_project(self, project: str | None) -> int:
+        """Count active reviewers that can serve a project queue.
+
+        Unscoped reviewers are considered eligible for all non-empty projects.
+        """
+        target_scope = self._normalize_scope(project)
+        count = 0
+        for reviewer_id, proc in self._processes.items():
+            if proc.returncode is not None or reviewer_id in self._draining:
+                continue
+            reviewer_scope = self._normalize_scope(self._project_scopes.get(reviewer_id))
+            if target_scope == "":
+                if reviewer_scope == "":
+                    count += 1
+                continue
+            if reviewer_scope in ("", target_scope):
+                count += 1
+        return count
 
     def _resolve_prompt_template_path(self) -> Path:
         path = Path(self.config.prompt_template_path).expanduser()
@@ -284,6 +366,7 @@ class ReviewerPool:
         db: aiosqlite.Connection,
         write_lock: asyncio.Lock,
         *,
+        project: str | None = None,
         ignore_cooldown: bool = False,
     ) -> dict:
         """Spawn and persist a reviewer subprocess."""
@@ -310,14 +393,29 @@ class ReviewerPool:
         self._counter += 1
         display_name = f"codex-r{self._counter}"
         reviewer_id = f"{display_name}-{self.session_token}"
-        argv = build_codex_argv(self.config)
+        project_scope = project.strip() if project and project.strip() else None
+        workspace_path = self.resolve_workspace_path(project_scope)
+        spawn_config = self.config.model_copy(update={"workspace_path": workspace_path})
+        argv = build_codex_argv(spawn_config)
         prompt_path = self._resolve_prompt_template_path()
         prompt = load_prompt_template(prompt_path, reviewer_id)
+        if project_scope is not None:
+            prompt = (
+                f"{prompt.rstrip()}\n\n"
+                "<project_scope>\n"
+                f'CRITICAL: You are project-scoped to "{project_scope}".\n'
+                f'- Only call list_reviews(status="pending", project="{project_scope}", wait=true).\n'
+                f'- Only claim reviews where project equals "{project_scope}".\n'
+                "- Ignore reviews for any other project.\n"
+                "</project_scope>\n"
+            )
         logger.info(
-            "pool.spawn_reviewer -> attempting reviewer_id=%s distro=%s model=%s",
+            "pool.spawn_reviewer -> attempting reviewer_id=%s distro=%s model=%s project=%s workspace=%s",
             reviewer_id,
             self.config.wsl_distro,
             self.config.model,
+            project_scope or "(any)",
+            workspace_path,
         )
         log_max_bytes = _read_positive_int_env(
             REVIEWER_LOG_MAX_BYTES_ENV_VAR,
@@ -372,11 +470,14 @@ class ReviewerPool:
                 await process.stdin.drain()
                 process.stdin.close()
             self._processes[reviewer_id] = process
+            self._project_scopes[reviewer_id] = project_scope
+            self._workspace_paths[reviewer_id] = workspace_path
             self._last_spawn_time = time.monotonic()
             await self._write_reviewer_log(
                 reviewer_id,
                 event="reviewer_spawned",
                 pid=process.pid,
+                message=f"project={project_scope or '(any)'} workspace={workspace_path}",
             )
 
             async with write_lock:
@@ -399,6 +500,8 @@ class ReviewerPool:
                             "reviewer_id": reviewer_id,
                             "display_name": display_name,
                             "pid": process.pid,
+                            "project_scope": project_scope,
+                            "workspace_path": workspace_path,
                         },
                     )
                     await db.execute("COMMIT")
@@ -418,6 +521,8 @@ class ReviewerPool:
             )
             await self._cleanup_reviewer_logging(reviewer_id, cancel_tasks=True)
             self._processes.pop(reviewer_id, None)
+            self._project_scopes.pop(reviewer_id, None)
+            self._workspace_paths.pop(reviewer_id, None)
             logger.warning("pool.spawn_reviewer -> failed reviewer_id=%s err=%s", reviewer_id, exc)
             return {"error": f"Failed to spawn reviewer: {exc}"}
 
@@ -431,6 +536,8 @@ class ReviewerPool:
             "display_name": display_name,
             "pid": process.pid if process is not None else None,
             "status": "active",
+            "project_scope": project_scope,
+            "workspace_path": workspace_path,
         }
 
     async def drain_reviewer(
@@ -566,6 +673,8 @@ class ReviewerPool:
 
         self._processes.pop(reviewer_id, None)
         self._draining.discard(reviewer_id)
+        self._project_scopes.pop(reviewer_id, None)
+        self._workspace_paths.pop(reviewer_id, None)
         await self._write_reviewer_log(
             reviewer_id,
             event="reviewer_terminated",

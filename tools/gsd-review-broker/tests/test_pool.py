@@ -156,6 +156,24 @@ def test_resolve_prompt_honors_env_override(
     assert pool._resolve_prompt_template_path() == forced_prompt
 
 
+def test_resolve_workspace_prefers_matching_project_child(tmp_path: Path) -> None:
+    projects_root = tmp_path / "Projects"
+    projects_root.mkdir()
+    target = projects_root / "Code2Obsidian"
+    target.mkdir()
+
+    cfg = SpawnConfig(
+        workspace_path=str(projects_root),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    assert pool.resolve_workspace_path("code2obsidian") == str(target)
+
+
 async def test_spawn_reviewer_creates_process(
     pool: ReviewerPool, db: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -175,6 +193,47 @@ async def test_spawn_reviewer_creates_process(
 
     cursor = await db.execute("SELECT id FROM reviewers WHERE id = ?", (reviewer_id,))
     assert await cursor.fetchone() is not None
+
+
+async def test_spawn_reviewer_project_scope_routes_workspace(
+    tmp_path: Path, db: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "Projects"
+    projects_root.mkdir()
+    target = projects_root / "Code2Obsidian"
+    target.mkdir()
+    prompt = projects_root / "reviewer_prompt.md"
+    prompt.write_text("Reviewer {reviewer_id}\n{claim_generation_note}\n", encoding="utf-8")
+
+    cfg = SpawnConfig(
+        workspace_path=str(projects_root),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    fake_proc = _FakeProcess()
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=fake_proc),
+    )
+    captured_workspaces: list[str] = []
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.build_codex_argv",
+        lambda cfg: captured_workspaces.append(cfg.workspace_path) or ["codex", "-"],
+    )
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.load_prompt_template",
+        lambda _path, reviewer_id: f"prompt:{reviewer_id}",
+    )
+
+    result = await pool.spawn_reviewer(db, asyncio.Lock(), project="code2obsidian")
+    assert "error" not in result
+    assert result["project_scope"] == "code2obsidian"
+    assert result["workspace_path"] == str(target)
+    assert captured_workspaces == [str(target)]
 
 
 async def test_spawn_reviewer_rate_limited(

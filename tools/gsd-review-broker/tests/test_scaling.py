@@ -219,6 +219,38 @@ async def test_reactive_scaling_sufficient_reviewers(
     assert spawn_mock.await_count == 0
 
 
+async def test_reactive_scaling_scopes_spawns_by_project(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    spawned_projects: list[str | None] = []
+
+    async def _fake_spawn(_db, _lock, *, project=None, ignore_cooldown=False):  # noqa: ANN001
+        del ignore_cooldown
+        spawned_projects.append(project)
+        return {
+            "reviewer_id": f"r-{len(spawned_projects)}",
+            "pid": 1000 + len(spawned_projects),
+            "status": "active",
+            "project_scope": project,
+        }
+
+    pool.spawn_reviewer = AsyncMock(side_effect=_fake_spawn)  # type: ignore[method-assign]
+
+    await ctx.lifespan_context.db.execute(
+        """INSERT INTO reviews (id, status, intent, agent_type, agent_role, phase, project)
+           VALUES ('proj-a', 'pending', 'p1', 'gsd-executor', 'proposer', '7', 'code2obsidian')"""
+    )
+    await ctx.lifespan_context.db.execute(
+        """INSERT INTO reviews (id, status, intent, agent_type, agent_role, phase, project)
+           VALUES ('proj-b', 'pending', 'p2', 'gsd-executor', 'proposer', '7', 'gsd-tandem')"""
+    )
+    await _reactive_scale_check(ctx.lifespan_context)
+
+    assert len(spawned_projects) == 2
+    assert set(spawned_projects) == {"code2obsidian", "gsd-tandem"}
+
+
 async def test_proposer_followup_requeue_triggers_reactive_scaling(
     ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

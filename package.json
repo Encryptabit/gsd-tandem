@@ -11,7 +11,11 @@
     "get-shit-done",
     "agents",
     "hooks/dist",
-    "scripts"
+    "scripts",
+    "tools/gsd-review-broker/pyproject.toml",
+    "tools/gsd-review-broker/uv.lock",
+    "tools/gsd-review-broker/reviewer_prompt.md",
+    "tools/gsd-review-broker/src/gsd_review_broker/**/*.py"
   ],
   "keywords": [
     "claude",

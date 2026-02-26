@@ -11,6 +11,8 @@ import json
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
+from gsd_review_broker.config_schema import SpawnConfig
+from gsd_review_broker.pool import ReviewerPool
 from gsd_review_broker.tools import (
     add_message,
     claim_review,
@@ -401,6 +403,41 @@ class TestClaimWithDiffValidation:
         mock_validate.assert_awaited_once_with(
             SAMPLE_DIFF, cwd=ctx.lifespan_context.repo_root
         )
+
+    async def test_claim_review_uses_project_workspace_for_validation(
+        self, ctx: MockContext, tmp_path
+    ) -> None:
+        projects_root = tmp_path / "Projects"
+        projects_root.mkdir()
+        project_dir = projects_root / "Code2Obsidian"
+        project_dir.mkdir()
+        ctx.lifespan_context.pool = ReviewerPool(
+            session_token="proj-session",
+            config=SpawnConfig(
+                workspace_path=str(projects_root),
+                model="o4-mini",
+                prompt_template_path=str(tmp_path / "reviewer_prompt.md"),
+            ),
+        )
+
+        created = await _create_review(
+            ctx,
+            intent="project workspace validation",
+            project="code2obsidian",
+            diff=SAMPLE_DIFF,
+        )
+
+        with patch(
+            "gsd_review_broker.tools.validate_diff",
+            new_callable=AsyncMock,
+            return_value=(True, ""),
+        ) as mock_validate:
+            result = await claim_review.fn(
+                review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+            )
+
+        assert result["status"] == "claimed"
+        mock_validate.assert_awaited_once_with(SAMPLE_DIFF, cwd=str(project_dir))
 
     async def test_claim_review_auto_rejects_bad_diff(self, ctx: MockContext) -> None:
         """Claiming a review with a diff that fails validation auto-rejects it."""

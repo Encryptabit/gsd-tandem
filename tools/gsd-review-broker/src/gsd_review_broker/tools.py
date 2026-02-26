@@ -119,6 +119,21 @@ def _resolve_caller(caller_id: str | None) -> str:
     return _reviewer_tag(caller_id)
 
 
+def _resolve_project_workspace(app: AppContext, project: str | None) -> str | None:
+    pool = getattr(app, "pool", None)
+    if pool is not None:
+        return pool.resolve_workspace_path(project)
+    return app.repo_root
+
+
+async def _project_for_review(app: AppContext, review_id: str) -> str | None:
+    cursor = await app.db.execute("SELECT project FROM reviews WHERE id = ?", (review_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return row["project"]
+
+
 @mcp_tool
 async def create_review(
     intent: str,
@@ -161,8 +176,12 @@ async def create_review(
     # Compute affected_files from diff if provided
     affected_files: str | None = None
     if diff is not None:
+        validation_project = project
+        if validation_project is None and review_id is not None:
+            validation_project = await _project_for_review(app, review_id)
         if not skip_diff_validation:
-            is_valid, error_detail = await validate_diff(diff, cwd=app.repo_root)
+            validation_cwd = _resolve_project_workspace(app, validation_project)
+            is_valid, error_detail = await validate_diff(diff, cwd=validation_cwd)
             if not is_valid:
                 logger.info(
                     "create_review -> %s validation_failed (%s)",
@@ -543,7 +562,8 @@ async def claim_review(
                 else False
             )
             if diff_text and not skip_validation:
-                is_valid, error_detail = await validate_diff(diff_text, cwd=app.repo_root)
+                validation_cwd = _resolve_project_workspace(app, row["project"])
+                is_valid, error_detail = await validate_diff(diff_text, cwd=validation_cwd)
                 if not is_valid:
                     await app.db.execute(
                         """UPDATE reviews
@@ -673,7 +693,16 @@ async def submit_verdict(
             return {
                 "error": "Counter-patches only allowed with changes_requested or comment verdicts"
             }
-        is_valid, error_detail = await validate_diff(counter_patch, cwd=app.repo_root)
+        review_cursor = await app.db.execute(
+            "SELECT project FROM reviews WHERE id = ?",
+            (review_id,),
+        )
+        review_row = await review_cursor.fetchone()
+        if review_row is None:
+            return {"error": f"Review not found: {review_id}"}
+        review_project = review_row["project"]
+        validation_cwd = _resolve_project_workspace(app, review_project)
+        is_valid, error_detail = await validate_diff(counter_patch, cwd=validation_cwd)
         if not is_valid:
             logger.info(
                 "submit_verdict -> %s counter_patch invalid (%s)",
@@ -1057,14 +1086,34 @@ async def _reactive_scale_check(app: AppContext, source: str = "unspecified") ->
     try:
         async with pool._spawn_lock:
             cursor = await app.db.execute(
-                "SELECT COUNT(*) AS n FROM reviews WHERE status = 'pending'"
+                """SELECT LOWER(TRIM(COALESCE(project, ''))) AS project_key,
+                          MIN(project) AS project_value,
+                          COUNT(*) AS n
+                   FROM reviews
+                   WHERE status = 'pending'
+                   GROUP BY LOWER(TRIM(COALESCE(project, '')))"""
             )
-            row = await cursor.fetchone()
-            pending = int(row["n"]) if row is not None else 0
+            rows = await cursor.fetchall()
+            pending = sum(int(row["n"]) for row in rows)
             active = pool.active_count
             ratio = pool.config.scaling_ratio
-            target_active = min(pool.config.max_pool_size, math.ceil(pending / ratio)) if pending > 0 else 0
-            spawn_needed = max(0, target_active - active)
+            spawn_plan: list[tuple[str | None, int]] = []
+            for row in rows:
+                pending_for_project = int(row["n"])
+                if pending_for_project <= 0:
+                    continue
+                project_key = (row["project_key"] or "").strip()
+                project_value = None if project_key == "" else (row["project_value"] or project_key)
+                target_for_project = math.ceil(pending_for_project / ratio)
+                active_for_project = pool.active_count_for_project(project_value)
+                needed_for_project = max(0, target_for_project - active_for_project)
+                if needed_for_project > 0:
+                    spawn_plan.append((project_value, needed_for_project))
+
+            requested_spawns = sum(needed for _, needed in spawn_plan)
+            spawn_capacity = max(0, pool.config.max_pool_size - active)
+            spawn_needed = min(spawn_capacity, requested_spawns)
+            target_active = active + spawn_needed
             should_spawn = spawn_needed > 0
             reason = "target_gap" if should_spawn else "capacity_sufficient"
             logger.info(
@@ -1080,30 +1129,36 @@ async def _reactive_scale_check(app: AppContext, source: str = "unspecified") ->
             )
             if should_spawn:
                 spawned = 0
-                for _ in range(spawn_needed):
-                    result = await pool.spawn_reviewer(
-                        app.db,
-                        app.write_lock,
-                        ignore_cooldown=True,
-                    )
-                    if "error" in result:
-                        logger.warning(
-                            "reactive_scale_check[%s] -> spawn failed after %s/%s: %s",
+                for project_value, project_spawns in spawn_plan:
+                    for _ in range(project_spawns):
+                        result = await pool.spawn_reviewer(
+                            app.db,
+                            app.write_lock,
+                            project=project_value,
+                            ignore_cooldown=True,
+                        )
+                        if "error" in result:
+                            logger.warning(
+                                "reactive_scale_check[%s] -> spawn failed after %s/%s (project=%s): %s",
+                                source,
+                                spawned,
+                                spawn_needed,
+                                project_value or "(any)",
+                                result["error"],
+                            )
+                            break
+                        spawned += 1
+                        logger.info(
+                            "reactive_scale_check[%s] -> spawn succeeded reviewer_id=%s pid=%s project=%s progress=%s/%s",
                             source,
+                            result.get("reviewer_id"),
+                            result.get("pid"),
+                            result.get("project_scope") or "(any)",
                             spawned,
                             spawn_needed,
-                            result["error"],
                         )
+                    if spawned >= spawn_needed:
                         break
-                    spawned += 1
-                    logger.info(
-                        "reactive_scale_check[%s] -> spawn succeeded reviewer_id=%s pid=%s progress=%s/%s",
-                        source,
-                        result.get("reviewer_id"),
-                        result.get("pid"),
-                        spawned,
-                        spawn_needed,
-                    )
                 logger.info(
                     "reactive_scale_check[%s] -> spawn summary requested=%s spawned=%s active_now=%s",
                     source,
@@ -1116,14 +1171,14 @@ async def _reactive_scale_check(app: AppContext, source: str = "unspecified") ->
 
 
 @mcp_tool
-async def spawn_reviewer(ctx: Context = None) -> dict:
+async def spawn_reviewer(project: str | None = None, ctx: Context = None) -> dict:
     """Manually spawn a reviewer process when pool mode is configured."""
     app: AppContext = _app_ctx(ctx)
     pool = getattr(app, "pool", None)
     if pool is None:
         return {"error": "Reviewer pool not configured. Add reviewer_pool section to config."}
     async with pool._spawn_lock:
-        result = await pool.spawn_reviewer(app.db, app.write_lock)
+        result = await pool.spawn_reviewer(app.db, app.write_lock, project=project)
     logger.info("spawn_reviewer -> %s", result)
     return result
 
@@ -1171,6 +1226,8 @@ async def list_reviewers(ctx: Context = None) -> dict:
             "total_review_seconds": row["total_review_seconds"],
             "approvals": row["approvals"],
             "rejections": row["rejections"],
+            "project_scope": pool.project_scope_for(row["id"]),
+            "workspace_path": pool.workspace_path_for(row["id"]),
         }
         for row in rows
     ]
@@ -1260,7 +1317,7 @@ async def accept_counter_patch(
         try:
             await app.db.execute("BEGIN IMMEDIATE")
             cursor = await app.db.execute(
-                """SELECT status, counter_patch, counter_patch_affected_files,
+                """SELECT status, counter_patch, counter_patch_affected_files, project,
                           counter_patch_status
                    FROM reviews WHERE id = ?""",
                 (review_id,),
@@ -1274,8 +1331,9 @@ async def accept_counter_patch(
                 return {"error": "No pending counter-patch to accept"}
 
             # Re-validate: diff may be stale
+            validation_cwd = _resolve_project_workspace(app, row["project"])
             is_valid, error_detail = await validate_diff(
-                row["counter_patch"], cwd=app.repo_root
+                row["counter_patch"], cwd=validation_cwd
             )
             if not is_valid:
                 await app.db.execute("ROLLBACK")

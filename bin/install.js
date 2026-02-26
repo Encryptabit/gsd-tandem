@@ -879,7 +879,7 @@ function uninstall(isGlobal, runtime = 'claude') {
   // 4. Remove GSD hooks
   const hooksDir = path.join(targetDir, 'hooks');
   if (fs.existsSync(hooksDir)) {
-    const gsdHooks = ['gsd-statusline.js', 'gsd-check-update.js', 'gsd-check-update.sh'];
+    const gsdHooks = ['gsd-statusline.js', 'gsd-check-update.js', 'gsd-ensure-broker.js', 'gsd-check-update.sh'];
     let hookCount = 0;
     for (const hook of gsdHooks) {
       const hookPath = path.join(hooksDir, hook);
@@ -894,7 +894,15 @@ function uninstall(isGlobal, runtime = 'claude') {
     }
   }
 
-  // 5. Remove GSD package.json (CommonJS mode marker)
+  // 5. Remove gsd-review-broker toolchain bundle
+  const brokerToolsDir = path.join(targetDir, 'tools', 'gsd-review-broker');
+  if (fs.existsSync(brokerToolsDir)) {
+    fs.rmSync(brokerToolsDir, { recursive: true });
+    removedCount++;
+    console.log(`  ${green}✓${reset} Removed tools/gsd-review-broker/`);
+  }
+
+  // 6. Remove GSD package.json (CommonJS mode marker)
   const pkgJsonPath = path.join(targetDir, 'package.json');
   if (fs.existsSync(pkgJsonPath)) {
     try {
@@ -910,7 +918,7 @@ function uninstall(isGlobal, runtime = 'claude') {
     }
   }
 
-  // 6. Clean up settings.json (remove GSD hooks and statusline)
+  // 7. Clean up settings.json (remove GSD hooks and statusline)
   const settingsPath = path.join(targetDir, 'settings.json');
   if (fs.existsSync(settingsPath)) {
     let settings = readSettings(settingsPath);
@@ -931,7 +939,11 @@ function uninstall(isGlobal, runtime = 'claude') {
         if (entry.hooks && Array.isArray(entry.hooks)) {
           // Filter out GSD hooks
           const hasGsdHook = entry.hooks.some(h =>
-            h.command && (h.command.includes('gsd-check-update') || h.command.includes('gsd-statusline'))
+            h.command && (
+              h.command.includes('gsd-check-update') ||
+              h.command.includes('gsd-statusline') ||
+              h.command.includes('gsd-ensure-broker')
+            )
           );
           return !hasGsdHook;
         }
@@ -957,7 +969,7 @@ function uninstall(isGlobal, runtime = 'claude') {
     }
   }
 
-  // 6. For OpenCode, clean up permissions from opencode.json
+  // 8. For OpenCode, clean up permissions from opencode.json
   if (isOpencode) {
     // For local uninstalls, clean up ./.opencode/opencode.json
     // For global uninstalls, clean up ~/.config/opencode/opencode.json
@@ -1179,6 +1191,50 @@ function verifyFileInstalled(filePath, description) {
 }
 
 /**
+ * Recursively copy only Python source files.
+ */
+function copyPythonTree(srcDir, destDir) {
+  if (!fs.existsSync(srcDir)) return;
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+
+    if (entry.isDirectory()) {
+      copyPythonTree(srcPath, destPath);
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.endsWith('.py')) {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+/**
+ * Copy a minimal broker runtime bundle (no tests/caches/dev artifacts).
+ */
+function copyBrokerBundle(srcDir, destDir) {
+  if (fs.existsSync(destDir)) {
+    fs.rmSync(destDir, { recursive: true });
+  }
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const topLevelFiles = ['pyproject.toml', 'uv.lock', 'reviewer_prompt.md'];
+  for (const file of topLevelFiles) {
+    const srcFile = path.join(srcDir, file);
+    if (!fs.existsSync(srcFile)) continue;
+    fs.copyFileSync(srcFile, path.join(destDir, file));
+  }
+
+  const moduleSrcDir = path.join(srcDir, 'src', 'gsd_review_broker');
+  const moduleDestDir = path.join(destDir, 'src', 'gsd_review_broker');
+  copyPythonTree(moduleSrcDir, moduleDestDir);
+}
+
+/**
  * Install to the specified directory for a specific runtime
  * @param {boolean} isGlobal - Whether to install globally or locally
  * @param {string} runtime - Target runtime ('claude', 'opencode', 'gemini')
@@ -1226,6 +1282,7 @@ function writeManifest(configDir) {
   const gsdDir = path.join(configDir, 'get-shit-done');
   const commandsDir = path.join(configDir, 'commands', 'gsd');
   const agentsDir = path.join(configDir, 'agents');
+  const brokerToolsDir = path.join(configDir, 'tools', 'gsd-review-broker');
   const manifest = { version: pkg.version, timestamp: new Date().toISOString(), files: {} };
 
   const gsdHashes = generateManifest(gsdDir);
@@ -1243,6 +1300,12 @@ function writeManifest(configDir) {
       if (file.startsWith('gsd-') && file.endsWith('.md')) {
         manifest.files['agents/' + file] = fileHash(path.join(agentsDir, file));
       }
+    }
+  }
+  if (fs.existsSync(brokerToolsDir)) {
+    const brokerHashes = generateManifest(brokerToolsDir);
+    for (const [rel, hash] of Object.entries(brokerHashes)) {
+      manifest.files['tools/gsd-review-broker/' + rel] = hash;
     }
   }
 
@@ -1492,6 +1555,22 @@ function install(isGlobal, runtime = 'claude') {
     }
   }
 
+  // Bundle the broker source so hooks can autostart it without extra setup.
+  // This is only needed for runtimes that use SessionStart hooks.
+  if (!isOpencode) {
+    const brokerToolsSrc = path.join(src, 'tools', 'gsd-review-broker');
+    if (fs.existsSync(brokerToolsSrc)) {
+      const brokerToolsDest = path.join(targetDir, 'tools', 'gsd-review-broker');
+      fs.mkdirSync(path.dirname(brokerToolsDest), { recursive: true });
+      copyBrokerBundle(brokerToolsSrc, brokerToolsDest);
+      if (verifyInstalled(brokerToolsDest, 'tools/gsd-review-broker')) {
+        console.log(`  ${green}✓${reset} Installed tools/gsd-review-broker`);
+      } else {
+        failures.push('tools/gsd-review-broker');
+      }
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`\n  ${yellow}Installation incomplete!${reset} Failed: ${failures.join(', ')}`);
     process.exit(1);
@@ -1507,6 +1586,9 @@ function install(isGlobal, runtime = 'claude') {
   const updateCheckCommand = isGlobal
     ? buildHookCommand(targetDir, 'gsd-check-update.js')
     : 'node ' + dirName + '/hooks/gsd-check-update.js';
+  const ensureBrokerCommand = isGlobal
+    ? buildHookCommand(targetDir, 'gsd-ensure-broker.js')
+    : 'node ' + dirName + '/hooks/gsd-ensure-broker.js';
 
   // Enable experimental agents for Gemini CLI (required for custom sub-agents)
   if (isGemini) {
@@ -1542,6 +1624,22 @@ function install(isGlobal, runtime = 'claude') {
         ]
       });
       console.log(`  ${green}✓${reset} Configured update check hook`);
+    }
+
+    const hasGsdBrokerHook = settings.hooks.SessionStart.some(entry =>
+      entry.hooks && entry.hooks.some(h => h.command && h.command.includes('gsd-ensure-broker'))
+    );
+
+    if (!hasGsdBrokerHook) {
+      settings.hooks.SessionStart.push({
+        hooks: [
+          {
+            type: 'command',
+            command: ensureBrokerCommand
+          }
+        ]
+      });
+      console.log(`  ${green}✓${reset} Configured broker autostart hook`);
     }
   }
 
