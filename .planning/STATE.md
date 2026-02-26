@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: 10 of 12 (Log Viewer Tab)
-Plan: 1 of 2 complete
-Status: Executing phase 10 — Log API backend complete (listing, reading, SSE tail)
-Last activity: 2026-02-26 — Completed 10-01-PLAN.md (Log API backend endpoints)
+Phase: 10 of 12 (Log Viewer Tab) -- COMPLETE
+Plan: 2 of 2 complete
+Status: Phase 10 complete — Log viewer tab fully delivered (backend API + frontend UI)
+Last activity: 2026-02-26 — Completed 10-02-PLAN.md (Log viewer frontend)
 
-Progress: [============================....] 83% (v1.0 complete, v1.1 phase 10 plan 1 of 2)
+Progress: [==============================..] 87% (v1.0 complete, v1.1 phase 10 complete)
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [============================....] 83% (v1.0 complete, v1.1 phase 10 p
 - 09-01 (overview backend API + SSE): 8 min, 2 tasks, 3 files
 - 09-02 (overview Astro frontend): 7 min, 1 task, 6 files
 - 10-01 (log API backend): 11 min, 2 tasks, 2 files
+- 10-02 (log viewer frontend): 6 min, 2 tasks, 5 files
 
 ## Accumulated Context
 
@@ -58,6 +59,8 @@ v1.1 decisions:
 - Dashboard _default_user_config_dir() duplicated in dashboard.py to avoid cross-module imports
 - SSE dual-interval loop: 2s log tail polling + 15s overview heartbeat via tick counter
 - Log file resolution tries broker-logs/ then reviewer-logs/ with Path.relative_to() security
+- Dedicated EventSource per-tab for SSE subscriptions requiring query parameters (vs shared singleton)
+- JSON.stringify-based search matching for simplest approach covering all log entry fields
 
 Key v1.0 decisions carried forward:
 
@@ -88,5 +91,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 10-01-PLAN.md
-Resume notes: Phase 10 plan 01 complete (log API backend). Run /gsd:execute-phase 10 for plan 02 (log viewer frontend).
+Stopped at: Completed 10-02-PLAN.md
+Resume notes: Phase 10 complete (log viewer tab). Both backend API (plan 01) and frontend UI (plan 02) delivered. Ready for Phase 11 (Review Browser Tab).
