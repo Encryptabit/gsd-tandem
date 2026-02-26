@@ -21,23 +21,6 @@ function safeJson(filePath) {
   }
 }
 
-function reviewEnabledForProject(cwd) {
-  const configPath = path.join(cwd, '.planning', 'config.json');
-  const cfg = safeJson(configPath);
-  if (!cfg || typeof cfg !== 'object') return false;
-  if (!cfg.review || typeof cfg.review !== 'object') return false;
-  return cfg.review.enabled !== false;
-}
-
-function isMcpConfigured(configDir) {
-  const settingsPath = path.join(configDir, 'settings.json');
-  const settings = safeJson(settingsPath);
-  if (!settings || typeof settings !== 'object') return false;
-  const servers = settings.mcpServers;
-  if (!servers || typeof servers !== 'object') return false;
-  return Object.prototype.hasOwnProperty.call(servers, 'gsdreview');
-}
-
 function uniquePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -54,6 +37,62 @@ function firstPath(paths, matcher) {
   for (const p of paths) {
     if (matcher(p)) return p;
   }
+  return null;
+}
+
+function collectUpwardFiles(startDir, filename) {
+  const files = [];
+  let current = path.resolve(startDir);
+  while (true) {
+    files.push(path.join(current, filename));
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return files;
+}
+
+function resolveProjectContext(startDir) {
+  for (const configPath of collectUpwardFiles(startDir, path.join('.planning', 'config.json'))) {
+    const cfg = safeJson(configPath);
+    if (!cfg || typeof cfg !== 'object') continue;
+    if (!cfg.review || typeof cfg.review !== 'object') continue;
+    return {
+      config: cfg,
+      configPath,
+      projectRoot: path.dirname(path.dirname(configPath)),
+    };
+  }
+  return null;
+}
+
+function resolveWorkspaceSeedContext(startDir) {
+  const workspaceRoot = path.resolve(startDir);
+  let entries;
+  try {
+    entries = fs.readdirSync(workspaceRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const sortedDirs = entries
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const dirName of sortedDirs) {
+    const configPath = path.join(workspaceRoot, dirName, '.planning', 'config.json');
+    const cfg = safeJson(configPath);
+    if (!cfg || typeof cfg !== 'object') continue;
+    if (!cfg.review || typeof cfg.review !== 'object') continue;
+    if (cfg.review.enabled === false) continue;
+    if (!cfg.reviewer_pool || typeof cfg.reviewer_pool !== 'object') continue;
+    return {
+      config: cfg,
+      configPath,
+      projectRoot: workspaceRoot,
+    };
+  }
+
   return null;
 }
 
@@ -98,6 +137,19 @@ function shouldThrottle(cacheFile) {
   return Date.now() - lastSpawnAt < SPAWN_COOLDOWN_MS;
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForBrokerReady(host, port, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isBrokerListening(host, port)) return true;
+    await delay(200);
+  }
+  return false;
+}
+
 function writeSpawnCache(cacheFile, payload) {
   try {
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
@@ -109,16 +161,23 @@ async function main() {
   if (process.env.GSD_BROKER_AUTOSTART === '0') return;
 
   const cwd = process.cwd();
+  const projectContext = resolveProjectContext(cwd);
+  const resolvedContext =
+    projectContext && projectContext.config.review.enabled !== false
+      ? projectContext
+      : resolveWorkspaceSeedContext(cwd);
+  if (!resolvedContext) return;
+
+  const brokerRepoRoot = resolvedContext.projectRoot;
+  const brokerConfigPath = resolvedContext.configPath;
   const homeDir = os.homedir();
   const candidateConfigDirs = uniquePaths([
     path.resolve(__dirname, '..'),
+    path.join(brokerRepoRoot, '.claude'),
     path.join(cwd, '.claude'),
     path.join(homeDir, '.claude'),
   ]);
   const cacheFile = path.join(homeDir, '.claude', 'cache', 'gsd-broker-autostart.json');
-
-  if (!reviewEnabledForProject(cwd)) return;
-  if (!firstPath(candidateConfigDirs, isMcpConfigured)) return;
 
   const brokerDir = firstPath(candidateConfigDirs, configDir => {
     const pyproject = path.join(configDir, 'tools', 'gsd-review-broker', 'pyproject.toml');
@@ -131,25 +190,37 @@ async function main() {
   if (await isBrokerListening(BROKER_HOST, BROKER_PORT)) return;
   if (shouldThrottle(cacheFile)) return;
 
-  const child = spawn(
-    'uv',
-    ['--directory', brokerProjectDir, 'run', 'gsd-review-broker'],
-    {
-      detached: true,
+  let child;
+  try {
+    const spawnOptions = {
+      detached: process.platform !== 'win32',
       stdio: 'ignore',
       windowsHide: true,
       env: {
         ...process.env,
-        BROKER_REPO_ROOT: cwd,
+        BROKER_REPO_ROOT: brokerRepoRoot,
+        BROKER_CONFIG_PATH: brokerConfigPath,
       },
-    }
-  );
+    };
+    child = spawn(
+      'uv',
+      ['--directory', brokerProjectDir, 'run', 'gsd-review-broker'],
+      spawnOptions
+    );
+  } catch {
+    return;
+  }
   child.unref();
+  await waitForBrokerReady(
+    process.env.GSD_BROKER_HOST || process.env.BROKER_HOST || BROKER_HOST,
+    BROKER_PORT
+  );
 
   writeSpawnCache(cacheFile, {
     last_spawn_at: Date.now(),
     pid: child.pid || null,
-    repo_root: cwd,
+    repo_root: brokerRepoRoot,
+    config_path: brokerConfigPath,
     broker_dir: brokerProjectDir,
   });
 }
