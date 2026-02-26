@@ -3,6 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import OverviewStatus from '../components/OverviewStatus.astro';
 import OverviewStats from '../components/OverviewStats.astro';
 import OverviewReviewers from '../components/OverviewReviewers.astro';
+import LogViewer from '../components/LogViewer.astro';
 ---
 
 <Layout title="GSD Tandem Dashboard">
@@ -13,8 +14,7 @@ import OverviewReviewers from '../components/OverviewReviewers.astro';
   </section>
 
   <section id="tab-logs" class="tab-panel" style="display:none">
-    <h2 class="tab-heading">Logs</h2>
-    <p class="tab-placeholder">Reviewer log viewer coming soon.</p>
+    <LogViewer />
   </section>
 
   <section id="tab-reviews" class="tab-panel" style="display:none">
@@ -29,6 +29,7 @@ import OverviewReviewers from '../components/OverviewReviewers.astro';
 </Layout>
 
 <script src="../scripts/overview.ts"></script>
+<script src="../scripts/logs.ts"></script>
 
 <style>
   .tab-panel {
