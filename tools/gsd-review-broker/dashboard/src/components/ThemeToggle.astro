@@ -1,5 +1,5 @@
 ---
-/* ThemeToggle: Dark/light mode toggle placeholder (scripts added in Task 2) */
+/* ThemeToggle: Dark/light mode toggle button with sun/moon icons */
 ---
 
 <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme">
@@ -19,7 +19,7 @@
   </svg>
 </button>
 
-<style>
+<style is:global>
   .theme-toggle {
     display: flex;
     align-items: center;
@@ -40,16 +40,16 @@
     border-color: var(--color-accent);
   }
 
-  .icon {
+  .theme-toggle .icon {
     width: 16px;
     height: 16px;
   }
 
-  /* In dark mode: show sun icon (click to go light) */
-  [data-theme="dark"] .icon-sun { display: block; }
-  [data-theme="dark"] .icon-moon { display: none; }
+  /* In dark mode: show sun icon (click to switch to light) */
+  [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+  [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
-  /* In light mode: show moon icon (click to go dark) */
-  [data-theme="light"] .icon-sun { display: none; }
-  [data-theme="light"] .icon-moon { display: block; }
+  /* In light mode: show moon icon (click to switch to dark) */
+  [data-theme="light"] .theme-toggle .icon-sun { display: none; }
+  [data-theme="light"] .theme-toggle .icon-moon { display: block; }
 </style>

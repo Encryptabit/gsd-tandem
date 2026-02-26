@@ -19,7 +19,7 @@ const { title = 'GSD Tandem Dashboard' } = Astro.props;
     <script is:inline>
       // Theme initialization: runs synchronously to prevent FOUC
       (function() {
-        const saved = localStorage.getItem('gsd-dashboard-theme');
+        var saved = localStorage.getItem('gsd-dashboard-theme');
         if (saved === 'light' || saved === 'dark') {
           document.documentElement.setAttribute('data-theme', saved);
         }
@@ -31,6 +31,9 @@ const { title = 'GSD Tandem Dashboard' } = Astro.props;
     <main class="main-content">
       <slot />
     </main>
+    <script src="../scripts/theme.ts"></script>
+    <script src="../scripts/tabs.ts"></script>
+    <script src="../scripts/sse.ts"></script>
   </body>
 </html>
 
