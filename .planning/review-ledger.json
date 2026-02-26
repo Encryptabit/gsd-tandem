@@ -10,8 +10,28 @@
       "artifact_hash": "1df583a86fdfdc909243e7f54b680299fe89dc7a1e8a2083ff4c6861c2d4f458",
       "note": "manual_bypass_reviewer_workspace_routing_bug",
       "recorded_at": "2026-02-26T09:03:44.810Z"
+    },
+    {
+      "entry_id": "1772102737387-xu6sj1",
+      "gate": "plan",
+      "phase": "8",
+      "review_id": null,
+      "status": "approved",
+      "artifact_hash": "ea40f914d3ef0ec381f78aa83c665d3d8e2c280eb7ade31cc9cc24ca1a4d44b8",
+      "note": "manual_override_reviewer_wrong_project_scope",
+      "recorded_at": "2026-02-26T10:45:37.387Z"
+    },
+    {
+      "entry_id": "1772107155584-jquumy",
+      "gate": "execute",
+      "phase": "8",
+      "review_id": "78c5b315-8f80-4812-b786-d676404cbcea",
+      "status": "approved",
+      "artifact_hash": "384d53dac58660b1290c9c7aaa0041042131c8ac993978823b62f3a59c983186",
+      "note": null,
+      "recorded_at": "2026-02-26T11:59:15.584Z"
     }
   ],
   "overrides": [],
-  "updated_at": "2026-02-26T09:03:44.811Z"
+  "updated_at": "2026-02-26T11:59:15.585Z"
 }

@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### v1.1 Web Dashboard
 
-- [ ] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker
+- [x] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker (completed 2026-02-26)
 - [ ] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list
 - [ ] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail
 - [ ] **Phase 11: Review Browser Tab** - Review list with filtering, detail view with diffs and verdicts, discussion threads
@@ -231,7 +231,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 5. Observability and Validation | v1.0 | 2/2 | Complete | 2026-02-18 |
 | 6. Review Gate Enforcement | v1.0 | 1/1 | Complete | 2026-02-18 |
 | 7. Reviewer Lifecycle Management | v1.0 | 4/4 | Complete | 2026-02-18 |
-| 8. Dashboard Shell and Infrastructure | v1.1 | 0/2 | Not started | - |
+| 8. Dashboard Shell and Infrastructure | v1.1 | Complete    | 2026-02-26 | - |
 | 9. Overview Tab | v1.1 | 0/? | Not started | - |
 | 10. Log Viewer Tab | v1.1 | 0/? | Not started | - |
 | 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
