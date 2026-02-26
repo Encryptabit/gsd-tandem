@@ -168,7 +168,11 @@ Plans:
   2. Dashboard displays a tab navigation bar with placeholder tabs (Overview, Logs, Reviews, Pool) that switch visible content areas
   3. Dashboard loads without any external CDN or network dependencies -- all assets are self-contained
   4. Dashboard page is visually polished with a distinctive, production-grade interface (DASH-02 frontend-design skill applied throughout all phases)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md -- Dashboard route handlers, HTML/CSS/JS shell with design system, SSE connection endpoint
+- [ ] 08-02-PLAN.md -- Dashboard route tests and visual human verification
 
 **Note**: DASH-02 (frontend-design skill) is a cross-cutting process requirement applied during all dashboard phases, not a standalone deliverable. It is assigned here as its home phase but its quality standard applies to phases 9-12 as well.
 
@@ -227,7 +231,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 5. Observability and Validation | v1.0 | 2/2 | Complete | 2026-02-18 |
 | 6. Review Gate Enforcement | v1.0 | 1/1 | Complete | 2026-02-18 |
 | 7. Reviewer Lifecycle Management | v1.0 | 4/4 | Complete | 2026-02-18 |
-| 8. Dashboard Shell and Infrastructure | v1.1 | 0/? | Not started | - |
+| 8. Dashboard Shell and Infrastructure | v1.1 | 0/2 | Not started | - |
 | 9. Overview Tab | v1.1 | 0/? | Not started | - |
 | 10. Log Viewer Tab | v1.1 | 0/? | Not started | - |
 | 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
