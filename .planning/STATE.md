@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Milestone v1.1 — Phase 8: Dashboard Shell and Infrastructure
+**Current focus:** Milestone v1.1 — Phase 8: Dashboard Shell and Infrastructure (Astro migration)
 
 ## Current Position
 
 Phase: 8 of 12 (Dashboard Shell and Infrastructure)
-Plan: 1 of 2
-Status: Executing
-Last activity: 2026-02-26 — Completed 08-01 (dashboard shell with HTML, CSS design system, SSE)
+Plan: Re-planning (Astro pivot)
+Status: Re-planning — previous inline HTML/CSS/JS implementation scrapped in favor of Astro static site generator
+Last activity: 2026-02-26 — Pivoted to Astro framework, updated CONTEXT, removed old plans
 
-Progress: [===================.............] 63% (v1.0 complete, v1.1 plan 08-01 done)
+Progress: [===================.............] 58% (v1.0 complete, v1.1 phase 8 re-planning)
 
 ## Performance Metrics
 
@@ -24,10 +24,7 @@ Progress: [===================.............] 63% (v1.0 complete, v1.1 plan 08-01
 - Total execution time: ~105 minutes
 
 **v1.1 Velocity:**
-
-| Phase | Plan | Duration | Tasks | Files |
-|-------|------|----------|-------|-------|
-| 08    | 01   | 15 min   | 2     | 2     |
+- Previous 08-01 and 08-02 implementations scrapped (inline HTML approach abandoned)
 
 ## Accumulated Context
 
@@ -36,9 +33,11 @@ Progress: [===================.............] 63% (v1.0 complete, v1.1 plan 08-01
 Decisions are logged in PROJECT.md Key Decisions table.
 
 v1.1 decisions:
-- mcp.custom_route decorator for dashboard HTTP routes (no new deps)
-- Self-contained HTML with inline CSS/JS, zero CDN dependencies
-- register_*_routes(mcp) pattern for modular route registration
+- **Astro static site generator** for dashboard frontend (replaces inline HTML/CSS/JS in Python)
+- Astro project at `tools/gsd-review-broker/dashboard/`, builds to `dashboard/dist/`
+- Python broker serves built static files at `/dashboard`, SSE endpoint stays in Python
+- Built `dist/` committed to repo — no Node.js needed at runtime, only at build time
+- register_*_routes(mcp) pattern for modular route registration (unchanged)
 
 Key v1.0 decisions carried forward:
 
@@ -51,7 +50,7 @@ Key v1.0 decisions carried forward:
 
 ### v1.1 Phase Structure
 
-- Phase 8: Dashboard shell (DASH-01, DASH-02) -- HTTP route, HTML scaffold, tab navigation
+- Phase 8: Dashboard shell (DASH-01, DASH-02) -- Astro project, static file serving, navigation shell, SSE
 - Phase 9: Overview tab (OVER-01, OVER-02, OVER-03) -- status, stats, active reviewers
 - Phase 10: Log viewer tab (LOGS-01, LOGS-02) -- JSONL browser + live tail
 - Phase 11: Review browser tab (REVW-01, REVW-02, REVW-03) -- list, detail, discussion
@@ -69,5 +68,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 08-01-PLAN.md (dashboard shell)
-Resume notes: Phase 8 plan 1 complete. Dashboard shell at /dashboard with dark neon-cyan theme, sidebar nav, tab switching, SSE health. Next: execute 08-02 (tests and dashboard verification)
+Stopped at: Pivoted Phase 8 to Astro framework. Old inline implementation scrapped.
+Resume notes: Re-planning Phase 8 with Astro. CONTEXT updated. Need to delete old dashboard.py/test_dashboard.py, remove old plan summaries, and run /gsd:plan-phase.
