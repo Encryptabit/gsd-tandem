@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** Every meaningful change Claude makes gets reviewed incrementally by a second intelligence before being applied
-**Current focus:** Milestone v1.1 — Phase 9: Overview Tab
+**Current focus:** Milestone v1.1 — Phase 10: Log Viewer Tab
 
 ## Current Position
 
-Phase: 9 of 12 (Overview Tab)
-Plan: 2 of 2 complete
-Status: Phase 9 complete — Overview tab fully implemented (backend API + frontend components)
-Last activity: 2026-02-26 — Completed 09-02-PLAN.md (Overview Astro frontend components)
+Phase: 10 of 12 (Log Viewer Tab)
+Plan: 1 of 2 complete
+Status: Executing phase 10 — Log API backend complete (listing, reading, SSE tail)
+Last activity: 2026-02-26 — Completed 10-01-PLAN.md (Log API backend endpoints)
 
-Progress: [==========================......] 79% (v1.0 complete, v1.1 phase 9 complete)
+Progress: [============================....] 83% (v1.0 complete, v1.1 phase 10 plan 1 of 2)
 
 ## Performance Metrics
 
@@ -29,6 +29,7 @@ Progress: [==========================......] 79% (v1.0 complete, v1.1 phase 9 co
 - 08-02 (static serving + SSE): 10 min, 2 tasks, 3 files
 - 09-01 (overview backend API + SSE): 8 min, 2 tasks, 3 files
 - 09-02 (overview Astro frontend): 7 min, 1 task, 6 files
+- 10-01 (log API backend): 11 min, 2 tasks, 2 files
 
 ## Accumulated Context
 
@@ -54,6 +55,9 @@ v1.1 decisions:
 - is:global CSS for dynamically-inserted class names in Astro (reviewer status dots in OverviewReviewers)
 - Tab data script pattern: DOMContentLoaded init fetches API, then subscribes SSE for live updates
 - Component ID convention: section-specific prefixes (broker-, stat-, reviewers-) for clear namespace
+- Dashboard _default_user_config_dir() duplicated in dashboard.py to avoid cross-module imports
+- SSE dual-interval loop: 2s log tail polling + 15s overview heartbeat via tick counter
+- Log file resolution tries broker-logs/ then reviewer-logs/ with Path.relative_to() security
 
 Key v1.0 decisions carried forward:
 
@@ -84,5 +88,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Phase 10 context gathered
-Resume notes: Phase 10 context captured (log viewer tab). Run /gsd:plan-phase 10 next.
+Stopped at: Completed 10-01-PLAN.md
+Resume notes: Phase 10 plan 01 complete (log API backend). Run /gsd:execute-phase 10 for plan 02 (log viewer frontend).
