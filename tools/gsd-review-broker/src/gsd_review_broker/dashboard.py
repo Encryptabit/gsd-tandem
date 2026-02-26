@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -32,6 +34,9 @@ CONTENT_TYPES: dict[str, str] = {
 }
 
 SSE_HEARTBEAT_INTERVAL: int = 15
+SSE_LOG_TAIL_INTERVAL: int = 2
+
+USER_CONFIG_DIRNAME = "gsd-review-broker"
 
 # Module-level AppContext, set by broker_lifespan via set_app_context().
 _app_ctx: AppContext | None = None
@@ -44,6 +49,97 @@ def set_app_context(ctx: AppContext) -> None:
     """Store the AppContext for dashboard route handlers to access."""
     global _app_ctx
     _app_ctx = ctx
+
+
+def _default_user_config_dir() -> Path:
+    """Resolve a cross-platform user config directory for broker state.
+
+    Duplicates the logic from server.py and pool.py to avoid importing from
+    those modules (same pattern as _query_review_stats duplicating SQL).
+    """
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / USER_CONFIG_DIRNAME
+
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata).expanduser() / USER_CONFIG_DIRNAME
+        return Path.home() / "AppData" / "Roaming" / USER_CONFIG_DIRNAME
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / USER_CONFIG_DIRNAME
+
+    return Path.home() / ".config" / USER_CONFIG_DIRNAME
+
+
+def _resolve_broker_log_dir() -> Path:
+    """Resolve the broker log directory, checking env var override first."""
+    override = os.environ.get("BROKER_LOG_DIR")
+    if override:
+        return Path(override).expanduser()
+    return _default_user_config_dir() / "broker-logs"
+
+
+def _resolve_reviewer_log_dir() -> Path:
+    """Resolve the reviewer log directory, checking env var override first."""
+    override = os.environ.get("BROKER_REVIEWER_LOG_DIR")
+    if override:
+        return Path(override).expanduser()
+    return _default_user_config_dir() / "reviewer-logs"
+
+
+def _list_log_files(log_dir: Path, source: str) -> list[dict]:
+    """List all JSONL log files in a directory with metadata.
+
+    Returns a list of dicts with name, size, modified (ISO 8601 UTC), and source.
+    Catches both .jsonl and rotated .jsonl.N files.
+    """
+    if not log_dir.is_dir():
+        return []
+
+    files = []
+    for f in log_dir.glob("*.jsonl*"):
+        if not f.is_file():
+            continue
+        stat = f.stat()
+        modified_dt = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+        files.append({
+            "name": f.name,
+            "size": stat.st_size,
+            "modified": modified_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "source": source,
+        })
+    return files
+
+
+def _resolve_log_file(filename: str) -> tuple[Path, str] | None:
+    """Resolve a log filename to its full path and source, with security checks.
+
+    Tries broker-logs/ first, then reviewer-logs/. Uses Path.relative_to()
+    for directory containment check (established pattern from dashboard_static).
+
+    Returns (resolved_path, source) or None if not found or path traversal detected.
+    """
+    candidates = [
+        (_resolve_broker_log_dir(), "broker"),
+        (_resolve_reviewer_log_dir(), "reviewer"),
+    ]
+
+    for log_dir, source in candidates:
+        if not log_dir.is_dir():
+            continue
+        candidate = (log_dir / filename).resolve()
+        # Security: directory containment check
+        try:
+            candidate.relative_to(log_dir.resolve())
+        except ValueError:
+            # Path traversal attempt
+            return None
+        if candidate.is_file():
+            return (candidate, source)
+
+    return None
 
 
 async def _query_review_stats(db: aiosqlite.Connection, project: str | None = None) -> dict:
@@ -318,7 +414,8 @@ def register_dashboard_routes(mcp: object) -> None:
     Route registration order matters: the catch-all {path:path} route MUST be
     registered LAST, otherwise it intercepts /dashboard/events and other specific routes.
 
-    Order: /dashboard/events, /dashboard/api/overview, /dashboard, /dashboard/{path:path}
+    Order: /dashboard/events, /dashboard/api/overview, /dashboard/api/logs,
+           /dashboard/api/logs/{filename}, /dashboard, /dashboard/{path:path}
     """
 
     @mcp.custom_route("/dashboard/events", methods=["GET"])  # type: ignore[union-attr]
@@ -367,6 +464,51 @@ def register_dashboard_routes(mcp: object) -> None:
         """JSON API endpoint returning broker status, review stats, and reviewer list."""
         data = await _build_overview_data()
         return JSONResponse(data)
+
+    @mcp.custom_route("/dashboard/api/logs", methods=["GET"])  # type: ignore[union-attr]
+    async def dashboard_logs_api(request: Request) -> Response:
+        """JSON API endpoint returning list of available log files."""
+        broker_dir = _resolve_broker_log_dir()
+        reviewer_dir = _resolve_reviewer_log_dir()
+
+        files = _list_log_files(broker_dir, "broker") + _list_log_files(reviewer_dir, "reviewer")
+
+        # Sort by modification time descending (most recent first)
+        files.sort(key=lambda f: f["modified"], reverse=True)
+
+        return JSONResponse({"files": files})
+
+    @mcp.custom_route("/dashboard/api/logs/{filename:path}", methods=["GET"])  # type: ignore[union-attr]
+    async def dashboard_log_file_api(request: Request) -> Response:
+        """JSON API endpoint returning parsed contents of a specific JSONL log file."""
+        filename = request.path_params["filename"]
+
+        result = _resolve_log_file(filename)
+        if result is None:
+            return PlainTextResponse("Not found", status_code=404)
+
+        file_path, source = result
+        file_size = file_path.stat().st_size
+
+        # Read and parse the entire file
+        entries: list[dict] = []
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Skip malformed entries from crashes/rotation
+                continue
+
+        return JSONResponse({
+            "filename": filename,
+            "source": source,
+            "entries": entries,
+            "size": file_size,
+        })
 
     @mcp.custom_route("/dashboard", methods=["GET"])  # type: ignore[union-attr]
     async def dashboard_index(request: Request) -> Response:
