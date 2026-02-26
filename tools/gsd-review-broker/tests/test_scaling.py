@@ -334,6 +334,49 @@ async def test_stale_requeue_reservation_is_auto_cleared_on_claim(
     assert fallback_claim["claimed_by"] == "fallback-reviewer"
 
 
+async def test_dead_process_clears_pending_reservation(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    spawned = await spawn_reviewer.fn(ctx=ctx)
+    reviewer_id = spawned["reviewer_id"]
+
+    created = await _create_review(ctx, intent="pending-reservation-then-dead")
+    claim = await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id=reviewer_id,
+        ctx=ctx,
+    )
+    assert "error" not in claim
+    verdict = await submit_verdict.fn(
+        review_id=created["review_id"],
+        verdict="changes_requested",
+        reason="needs follow-up",
+        reviewer_id=reviewer_id,
+        claim_generation=claim["claim_generation"],
+        ctx=ctx,
+    )
+    assert "error" not in verdict
+    await add_message.fn(
+        review_id=created["review_id"],
+        sender_role="proposer",
+        body="follow-up details",
+        ctx=ctx,
+    )
+
+    proc = pool._processes[reviewer_id]
+    proc.returncode = 0
+    await _check_dead_processes(ctx.lifespan_context)
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status, claimed_by FROM reviews WHERE id = ?",
+        (created["review_id"],),
+    )
+    review_row = await cursor.fetchone()
+    assert review_row["status"] == "pending"
+    assert review_row["claimed_by"] is None
+
+
 async def test_background_reactive_scaling_pass(
     ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -548,7 +591,7 @@ async def test_dead_process_reclaims_claimed_review_then_terminates(
     assert reviewer_id not in pool._processes
 
 
-async def test_dead_process_with_open_changes_requested_stays_draining(
+async def test_dead_process_with_open_changes_requested_detaches_and_terminates(
     ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
@@ -578,14 +621,14 @@ async def test_dead_process_with_open_changes_requested_stays_draining(
     )
     review_row = await cursor.fetchone()
     assert review_row["status"] == "changes_requested"
-    assert review_row["claimed_by"] == reviewer_id
+    assert review_row["claimed_by"] is None
 
     cursor = await ctx.lifespan_context.db.execute(
         "SELECT status FROM reviewers WHERE id = ?",
         (reviewer_id,),
     )
     reviewer_row = await cursor.fetchone()
-    assert reviewer_row["status"] == "draining"
+    assert reviewer_row["status"] == "terminated"
     assert reviewer_id not in pool._processes
 
 

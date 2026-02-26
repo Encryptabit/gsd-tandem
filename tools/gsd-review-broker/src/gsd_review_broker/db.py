@@ -16,8 +16,9 @@ from typing import Any
 import aiosqlite
 from fastmcp import FastMCP
 
+from gsd_review_broker.audit import record_event
 from gsd_review_broker.config_schema import load_spawn_config
-from gsd_review_broker.notifications import NotificationBus
+from gsd_review_broker.notifications import QUEUE_TOPIC, NotificationBus
 from gsd_review_broker.pool import ReviewerPool
 
 DB_FILENAME = "codex_review_broker.sqlite3"
@@ -398,9 +399,47 @@ async def _check_dead_processes(ctx: AppContext) -> None:
         )
         attached_rows = await cursor.fetchall()
 
+        detached_review_ids: list[str] = []
+        detached_pending = False
         for row in attached_rows:
             if row["status"] == "claimed":
                 await reclaim_review(row["id"], ctx, reason="reviewer_process_exit")
+                continue
+            detached_review_ids.append(row["id"])
+            if row["status"] == "pending":
+                detached_pending = True
+
+        if detached_review_ids:
+            async with ctx.write_lock:
+                await ctx.db.execute("BEGIN IMMEDIATE")
+                try:
+                    for review_id in detached_review_ids:
+                        await ctx.db.execute(
+                            """UPDATE reviews
+                               SET claimed_by = NULL,
+                                   claimed_at = NULL,
+                                   updated_at = datetime('now')
+                               WHERE id = ? AND claimed_by = ?""",
+                            (review_id, reviewer_id),
+                        )
+                        await record_event(
+                            ctx.db,
+                            review_id,
+                            "review_detached",
+                            actor="pool-manager",
+                            metadata={
+                                "reason": "reviewer_process_exit",
+                                "reviewer_id": reviewer_id,
+                            },
+                        )
+                    await ctx.db.execute("COMMIT")
+                except Exception:
+                    await _rollback_quietly(ctx.db)
+                    raise
+            for review_id in detached_review_ids:
+                ctx.notifications.notify(review_id)
+            if detached_pending:
+                ctx.notifications.notify(QUEUE_TOPIC)
 
         cursor = await ctx.db.execute(
             """SELECT COUNT(*) AS n

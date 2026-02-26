@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 import uuid
 from contextlib import suppress
@@ -117,6 +118,24 @@ def _resolve_caller(caller_id: str | None) -> str:
     if not caller_id or caller_id.strip() == "":
         return "broker"
     return _reviewer_tag(caller_id)
+
+
+def _normalize_project_key(project: str | None) -> str:
+    if project is None:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", project.strip().lower())
+
+
+def _reviewer_project_scope(app: AppContext, reviewer_id: str | None) -> str | None:
+    if _missing(reviewer_id):
+        return None
+    pool = getattr(app, "pool", None)
+    if pool is None:
+        return None
+    scope = pool.project_scope_for(reviewer_id)
+    if _missing(scope):
+        return None
+    return scope.strip()
 
 
 def _resolve_project_workspace(app: AppContext, project: str | None) -> str | None:
@@ -379,6 +398,32 @@ async def list_reviews(
         return {"error": "'projects' must contain at least one project identifier."}
 
     app: AppContext = _app_ctx(ctx)
+    scoped_project = _reviewer_project_scope(app, caller_id)
+    if scoped_project is not None:
+        scoped_key = _normalize_project_key(scoped_project)
+        if project is not None and _normalize_project_key(project) != scoped_key:
+            return {
+                "error": (
+                    f"Reviewer {caller_id} is scoped to project '{scoped_project}' "
+                    f"and cannot list project '{project}'."
+                )
+            }
+        if projects is not None:
+            normalized_projects = {
+                _normalize_project_key(value)
+                for value in projects
+                if value is not None and value.strip() != ""
+            }
+            if normalized_projects != {scoped_key}:
+                return {
+                    "error": (
+                        f"Reviewer {caller_id} is scoped to project '{scoped_project}' "
+                        "and cannot list other projects."
+                    )
+                }
+        if project is None and projects is None:
+            project = scoped_project
+
     project_filter_values = [project] if project is not None else projects
 
     async def _query() -> list[dict]:
@@ -507,6 +552,20 @@ async def claim_review(
             if row is None:
                 await app.db.execute("ROLLBACK")
                 return {"error": f"Review not found: {review_id}"}
+            scoped_project = _reviewer_project_scope(app, reviewer_id)
+            if scoped_project is not None:
+                scope_key = _normalize_project_key(scoped_project)
+                review_project = row["project"]
+                review_key = _normalize_project_key(review_project)
+                if review_key != scope_key:
+                    await app.db.execute("ROLLBACK")
+                    project_label = review_project if not _missing(review_project) else "(none)"
+                    return {
+                        "error": (
+                            f"Reviewer {reviewer_id} is scoped to project '{scoped_project}' "
+                            f"and cannot claim review project '{project_label}'."
+                        )
+                    }
             current_status = ReviewStatus(row["status"])
             try:
                 validate_transition(current_status, ReviewStatus.CLAIMED)

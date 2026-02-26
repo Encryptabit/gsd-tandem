@@ -182,6 +182,26 @@ class ReviewerPool:
     def _normalize_scope(self, project: str | None) -> str:
         return _normalize_project_key(project)
 
+    @staticmethod
+    def _find_matching_project_dir(root: Path, token: str) -> Path | None:
+        """Locate an immediate child directory matching project token variants."""
+        if not root.exists() or not root.is_dir():
+            return None
+
+        direct = root / token
+        if direct.exists() and direct.is_dir():
+            return direct
+
+        token_key = _normalize_project_key(token)
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.lower() == token.lower():
+                return child
+            if _normalize_project_key(child.name) == token_key:
+                return child
+        return None
+
     def resolve_workspace_path(self, project: str | None = None) -> str:
         """Resolve the workspace path for a project-scoped reviewer.
 
@@ -190,7 +210,8 @@ class ReviewerPool:
         2) `workspace_path/<project>` direct child match
         3) Case-insensitive child directory match
         4) Slug-normalized child directory match (e.g. code2obsidian -> Code2Obsidian)
-        5) Base workspace_path fallback
+        5) Sibling match when workspace_path appears to be a single repo root
+        6) Base workspace_path fallback
         """
         base = Path(self.config.workspace_path).expanduser()
         if project is None or project.strip() == "":
@@ -201,19 +222,18 @@ class ReviewerPool:
         if _looks_like_absolute_path(token) and project_path.exists():
             return str(project_path)
 
-        direct = base / token
-        if direct.exists() and direct.is_dir():
-            return str(direct)
+        in_base = self._find_matching_project_dir(base, token)
+        if in_base is not None:
+            return str(in_base)
 
-        if base.exists() and base.is_dir():
-            children = [child for child in base.iterdir() if child.is_dir()]
-            for child in children:
-                if child.name.lower() == token.lower():
-                    return str(child)
-            token_key = _normalize_project_key(token)
-            for child in children:
-                if _normalize_project_key(child.name) == token_key:
-                    return str(child)
+        # If base itself is a repo root (common with workspace_path="auto"),
+        # attempt project lookup among siblings under the parent directory.
+        if (base / ".git").exists() or (base / ".planning").exists():
+            parent = base.parent
+            if parent != base:
+                sibling = self._find_matching_project_dir(parent, token)
+                if sibling is not None:
+                    return str(sibling)
 
         if _normalize_project_key(base.name) == _normalize_project_key(token):
             return str(base)

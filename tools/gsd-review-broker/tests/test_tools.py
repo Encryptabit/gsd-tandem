@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 # ---- Helpers ----
 
 
+class _PoolScopeStub:
+    def __init__(self, mapping: dict[str, str | None]) -> None:
+        self._mapping = mapping
+
+    def project_scope_for(self, reviewer_id: str) -> str | None:
+        return self._mapping.get(reviewer_id)
+
+
 async def _create_review(ctx: MockContext, **overrides) -> dict:
     """Shortcut to create a review with default values."""
     defaults = {
@@ -133,6 +141,30 @@ class TestListReviews:
         assert "error" in result
         assert "at least one" in result["error"]
 
+    async def test_list_reviews_applies_project_scope_for_managed_reviewer(
+        self, ctx: MockContext
+    ) -> None:
+        ctx.lifespan_context.pool = _PoolScopeStub({"r-alpha": "alpha"})  # type: ignore[assignment]
+        await _create_review(ctx, intent="alpha review", project="alpha")
+        await _create_review(ctx, intent="beta review", project="beta")
+
+        scoped = await list_reviews.fn(status="pending", caller_id="r-alpha", ctx=ctx)
+        assert len(scoped["reviews"]) == 1
+        assert scoped["reviews"][0]["project"] == "alpha"
+
+    async def test_list_reviews_rejects_project_scope_conflict(
+        self, ctx: MockContext
+    ) -> None:
+        ctx.lifespan_context.pool = _PoolScopeStub({"r-alpha": "alpha"})  # type: ignore[assignment]
+        result = await list_reviews.fn(
+            status="pending",
+            project="beta",
+            caller_id="r-alpha",
+            ctx=ctx,
+        )
+        assert "error" in result
+        assert "scoped to project 'alpha'" in result["error"]
+
 
 # ---- claim_review tests ----
 
@@ -182,6 +214,19 @@ class TestClaimReview:
         assert len(successes) == 1
         assert len(errors) == 1
         assert "Invalid transition" in errors[0]["error"]
+
+    async def test_claim_review_rejects_project_scope_mismatch(
+        self, ctx: MockContext
+    ) -> None:
+        ctx.lifespan_context.pool = _PoolScopeStub({"r-alpha": "alpha"})  # type: ignore[assignment]
+        created = await _create_review(ctx, project="beta")
+        result = await claim_review.fn(
+            review_id=created["review_id"],
+            reviewer_id="r-alpha",
+            ctx=ctx,
+        )
+        assert "error" in result
+        assert "scoped to project 'alpha'" in result["error"]
 
 
 # ---- submit_verdict tests ----

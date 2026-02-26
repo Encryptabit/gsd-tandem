@@ -174,6 +174,27 @@ def test_resolve_workspace_prefers_matching_project_child(tmp_path: Path) -> Non
     assert pool.resolve_workspace_path("code2obsidian") == str(target)
 
 
+def test_resolve_workspace_uses_sibling_when_base_is_repo_root(tmp_path: Path) -> None:
+    projects_root = tmp_path / "Projects"
+    projects_root.mkdir()
+    base_repo = projects_root / "Code2Obsidian"
+    target = projects_root / "gsd-tandem"
+    base_repo.mkdir()
+    target.mkdir()
+    (base_repo / ".planning").mkdir()
+
+    cfg = SpawnConfig(
+        workspace_path=str(base_repo),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    assert pool.resolve_workspace_path("gsd-tandem") == str(target)
+
+
 async def test_spawn_reviewer_creates_process(
     pool: ReviewerPool, db: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
