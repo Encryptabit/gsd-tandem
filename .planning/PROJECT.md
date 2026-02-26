@@ -20,24 +20,25 @@ Every meaningful change Claude makes — plans, code, verification artifacts —
 - ✓ Plan checker and verifier agents — existing
 - ✓ Session pause/resume with context preservation — existing
 - ✓ Multi-runtime support (Claude Code, OpenCode, Gemini CLI) — existing
+- ✓ MCP review broker server (Python FastMCP, Streamable HTTP, SQLite persistence) — v1.0
+- ✓ Review lifecycle: create, claim, message, submit verdict, close — v1.0
+- ✓ Proposal/approval protocol with unified diffs, verdicts, counter-patches — v1.0
+- ✓ Full agent identity in proposals (agent type, phase, plan, task) — v1.0
+- ✓ Claude-side checkpoint mechanism with broker gate enforcement — v1.0
+- ✓ Configurable wait strategy and review granularity — v1.0
+- ✓ Full GSD workflow coverage (plan, execute, discuss, verify) — v1.0
+- ✓ Reviewer-agnostic design (Codex, Claude, human) — v1.0
+- ✓ MCP observability tools (audit log, activity feed, stats, timeline) — v1.0
+- ✓ Reviewer lifecycle management (auto-scaling pool, fenced reclaim, subprocess spawning) — v1.0
+- ✓ localhost-only binding, SQLite persistence — v1.0
 
 ### Active
 
-- [ ] MCP review broker server (Python FastMCP, Streamable HTTP, SQLite persistence)
-- [ ] Review lifecycle: create, claim, message, submit verdict, close
-- [ ] Proposal/approval protocol: PROPOSAL (intent + unified diff), APPROVAL (verdict + notes), PATCH (reviewer-supplied diff)
-- [ ] Full agent identity in proposals (agent type, phase, plan, task number)
-- [ ] Claude-side checkpoint mechanism that submits proposals and awaits approval before applying
-- [ ] Sub-agent proposal support (gsd-executor instances submit directly to broker)
-- [ ] Configurable wait strategy (blocking default, optimistic mode optional)
-- [ ] Configurable review granularity (per-task default, per-plan optional)
-- [ ] Claude reviews reviewer patches before applying (back-and-forth discussion)
-- [ ] Full GSD workflow coverage (plan-phase, execute-phase, discuss-phase, verify-work)
-- [ ] Reviewer-agnostic design (Codex, Claude, human — any reviewer can connect)
-- [ ] Real-time observability (user can watch proposals flow through and intervene)
-- [ ] Forked GSD commands with MCP tool permissions (mcp__gsdreview__*)
-- [ ] localhost-only binding (127.0.0.1, no SaaS dependency)
-- [ ] SQLite persistence at .planning/codex_review_broker.sqlite3
+- [ ] Web dashboard embedded in broker (Overview, Logs, Review Browser, Pool Management tabs)
+- [ ] Real-time broker status and configuration display
+- [ ] JSONL log viewer for both broker and reviewer subprocess logs
+- [ ] Review browser with diff viewer and discussion threads
+- [ ] Pool management UI (spawn, kill, status of reviewer subprocesses)
 
 ### Out of Scope
 
@@ -85,5 +86,15 @@ GSD's existing checkpoint system (checkpoint:human-verify, checkpoint:decision) 
 | Blocking wait as default | Simpler to reason about, prevents state divergence | — Pending |
 | Full agent identity in proposals | Enables observability and maps reviews back to agent JSONL logs | — Pending |
 
+## Current Milestone: v1.1 Web Dashboard
+
+**Goal:** Give users real-time visual insight into broker activity, review history, reviewer pool status, and structured logs through a web dashboard embedded in the broker server.
+
+**Target features:**
+- Overview tab with broker status, config, stats, active reviewers
+- Logs tab streaming JSONL from broker and reviewer subprocesses
+- Review browser for navigating reviews, viewing diffs, reading discussion threads
+- Pool management for spawning/killing/monitoring reviewer subprocesses
+
 ---
-*Last updated: 2026-02-16 after initialization*
+*Last updated: 2026-02-25 after milestone v1.1 start*
