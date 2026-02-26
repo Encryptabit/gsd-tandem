@@ -1,0 +1,116 @@
+---
+/**
+ * OverviewStatus - Broker status hero section (OVER-01)
+ * Displays broker health, version, uptime, address, and config settings.
+ * All values populated dynamically by overview.ts.
+ */
+---
+
+<div class="status-card" id="broker-status">
+  <div class="status-header">
+    <span class="status-dot" id="broker-status-dot"></span>
+    <span class="status-label" id="broker-status-label">Connecting...</span>
+  </div>
+  <div class="status-grid">
+    <div class="status-item">
+      <span class="status-key">Version</span>
+      <span class="status-value" id="broker-version">--</span>
+    </div>
+    <div class="status-item">
+      <span class="status-key">Uptime</span>
+      <span class="status-value status-value-lg" id="broker-uptime">--</span>
+    </div>
+    <div class="status-item">
+      <span class="status-key">Address</span>
+      <span class="status-value" id="broker-address">--</span>
+    </div>
+  </div>
+  <div class="config-grid" id="broker-config">
+    <!-- Config items populated by overview.ts -->
+  </div>
+</div>
+
+<style>
+  .status-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .status-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--color-text-secondary);
+    transition: background-color var(--transition-speed) ease;
+  }
+
+  .status-dot[data-status="online"] {
+    background-color: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success);
+  }
+
+  .status-dot[data-status="offline"] {
+    background-color: var(--color-error);
+    box-shadow: 0 0 6px var(--color-error);
+  }
+
+  .status-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .status-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+  }
+
+  .status-key {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .status-value {
+    font-size: var(--font-size-base);
+    color: var(--color-text);
+  }
+
+  .status-value-lg {
+    font-size: var(--font-size-lg);
+  }
+
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--spacing-sm) var(--spacing-md);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .config-grid:empty {
+    display: none;
+  }
+</style>

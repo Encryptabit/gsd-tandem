@@ -1,0 +1,150 @@
+---
+/**
+ * OverviewStats - Aggregate review statistics grid (OVER-02)
+ * Displays total reviews, approval rate, avg review time, and status breakdown.
+ * All values populated dynamically by overview.ts.
+ */
+---
+
+<div class="stats-section" id="review-stats">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-value" id="stat-total-reviews">--</span>
+      <span class="stat-label">Total Reviews</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value" id="stat-approval-rate">--</span>
+      <span class="stat-label">Approval Rate</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value" id="stat-avg-time">--</span>
+      <span class="stat-label">Avg Review Time</span>
+    </div>
+    <div class="stat-card stat-card-breakdown">
+      <span class="stat-label stat-label-top">Status Breakdown</span>
+      <div class="status-breakdown" id="stat-status-breakdown">
+        <div class="breakdown-item">
+          <span class="breakdown-dot breakdown-dot-pending"></span>
+          <span class="breakdown-label">Pending</span>
+          <span class="breakdown-count" id="status-pending">0</span>
+        </div>
+        <div class="breakdown-item">
+          <span class="breakdown-dot breakdown-dot-claimed"></span>
+          <span class="breakdown-label">Claimed</span>
+          <span class="breakdown-count" id="status-claimed">0</span>
+        </div>
+        <div class="breakdown-item">
+          <span class="breakdown-dot breakdown-dot-approved"></span>
+          <span class="breakdown-label">Approved</span>
+          <span class="breakdown-count" id="status-approved">0</span>
+        </div>
+        <div class="breakdown-item">
+          <span class="breakdown-dot breakdown-dot-changes-requested"></span>
+          <span class="breakdown-label">Changes</span>
+          <span class="breakdown-count" id="status-changes_requested">0</span>
+        </div>
+        <div class="breakdown-item">
+          <span class="breakdown-dot breakdown-dot-closed"></span>
+          <span class="breakdown-label">Closed</span>
+          <span class="breakdown-count" id="status-closed">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .stats-section {
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--spacing-md);
+  }
+
+  .stat-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+  }
+
+  .stat-value {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--color-accent);
+    line-height: 1.2;
+  }
+
+  .stat-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .stat-label-top {
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .stat-card-breakdown {
+    grid-column: span 1;
+  }
+
+  .status-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+  }
+
+  .breakdown-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+  }
+
+  .breakdown-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .breakdown-dot-pending {
+    background-color: var(--color-warning);
+  }
+
+  .breakdown-dot-claimed {
+    background-color: var(--color-accent);
+  }
+
+  .breakdown-dot-approved {
+    background-color: var(--color-success);
+  }
+
+  .breakdown-dot-changes-requested {
+    background-color: var(--color-error);
+  }
+
+  .breakdown-dot-closed {
+    background-color: var(--color-text-secondary);
+  }
+
+  .breakdown-label {
+    color: var(--color-text-secondary);
+    flex: 1;
+  }
+
+  .breakdown-count {
+    color: var(--color-text);
+    font-weight: 600;
+    min-width: 20px;
+    text-align: right;
+  }
+</style>

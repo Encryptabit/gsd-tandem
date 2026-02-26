@@ -1,0 +1,143 @@
+---
+/**
+ * OverviewReviewers - Active reviewer list table (OVER-03)
+ * Displays reviewer subprocess information including name, status, PID,
+ * current review, reviews completed, approvals, and uptime.
+ * All data populated dynamically by overview.ts.
+ */
+---
+
+<div class="reviewers-section" id="reviewer-list">
+  <h3 class="section-heading">Active Reviewers</h3>
+  <div class="reviewers-empty" id="reviewers-empty">
+    <p>No active reviewers. Pool is idle or not configured.</p>
+  </div>
+  <div class="reviewers-table-wrap" id="reviewers-table-wrap" style="display:none">
+    <table class="reviewers-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>PID</th>
+          <th>Current Review</th>
+          <th class="col-right">Reviews</th>
+          <th class="col-right">Approvals</th>
+          <th>Uptime</th>
+        </tr>
+      </thead>
+      <tbody id="reviewers-tbody">
+        <!-- Rows populated by overview.ts -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .reviewers-section {
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .section-heading {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 var(--spacing-md) 0;
+  }
+
+  .reviewers-empty {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    text-align: center;
+    padding: var(--spacing-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+  }
+
+  .reviewers-empty p {
+    margin: 0;
+  }
+
+  .reviewers-table-wrap {
+    overflow-x: auto;
+  }
+
+  .reviewers-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+  }
+
+  .reviewers-table thead th {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    text-align: left;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+
+  .reviewers-table tbody td {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+
+  .reviewers-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .reviewers-table tbody tr:hover {
+    background-color: var(--color-surface-hover);
+  }
+
+  .col-right {
+    text-align: right;
+  }
+</style>
+
+<style is:global>
+  .reviewer-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+  }
+
+  .reviewer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .reviewer-dot-active {
+    background-color: var(--color-success);
+  }
+
+  .reviewer-dot-draining {
+    background-color: var(--color-warning);
+  }
+
+  .reviewer-dot-terminated {
+    background-color: var(--color-error);
+  }
+
+  .reviewer-dot-idle {
+    background-color: var(--color-text-secondary);
+  }
+
+  .reviewer-col-right {
+    text-align: right;
+  }
+
+  .reviewer-current-none {
+    color: var(--color-text-secondary);
+  }
+</style>

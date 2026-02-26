@@ -1,11 +1,15 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import OverviewStatus from '../components/OverviewStatus.astro';
+import OverviewStats from '../components/OverviewStats.astro';
+import OverviewReviewers from '../components/OverviewReviewers.astro';
 ---
 
 <Layout title="GSD Tandem Dashboard">
   <section id="tab-overview" class="tab-panel">
-    <h2 class="tab-heading">Overview</h2>
-    <p class="tab-placeholder">System status and metrics will appear here.</p>
+    <OverviewStatus />
+    <OverviewStats />
+    <OverviewReviewers />
   </section>
 
   <section id="tab-logs" class="tab-panel" style="display:none">
@@ -23,6 +27,8 @@ import Layout from '../layouts/Layout.astro';
     <p class="tab-placeholder">Pool management coming soon.</p>
   </section>
 </Layout>
+
+<script src="../scripts/overview.ts"></script>
 
 <style>
   .tab-panel {
