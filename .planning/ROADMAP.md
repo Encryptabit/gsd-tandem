@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### v1.1 Web Dashboard
 
-- [x] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker (completed 2026-02-26)
+- [x] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker (completed 2026-02-26)
 - [ ] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list
 - [ ] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail
 - [ ] **Phase 11: Review Browser Tab** - Review list with filtering, detail view with diffs and verdicts, discussion threads
@@ -184,7 +184,11 @@ Plans:
   1. Dashboard displays broker status including server address, uptime, version, and key configuration settings from config.json
   2. Dashboard displays aggregate review statistics (total reviews, approval rate, average review time) populated from the same data as get_review_stats
   3. Dashboard displays a list of active reviewer subprocesses showing each reviewer's status, current review assignment, and per-reviewer stats (reviews completed, uptime)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md -- Python API endpoint (/dashboard/api/overview) and SSE overview_update data events with tests
+- [ ] 09-02-PLAN.md -- Astro components (status, stats, reviewers), overview.ts data script, build to dist/
 
 ### Phase 10: Log Viewer Tab
 **Goal**: User can browse historical log files and watch new log entries appear in real-time without leaving the dashboard
@@ -231,8 +235,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 5. Observability and Validation | v1.0 | 2/2 | Complete | 2026-02-18 |
 | 6. Review Gate Enforcement | v1.0 | 1/1 | Complete | 2026-02-18 |
 | 7. Reviewer Lifecycle Management | v1.0 | 4/4 | Complete | 2026-02-18 |
-| 8. Dashboard Shell and Infrastructure | v1.1 | Complete    | 2026-02-26 | - |
-| 9. Overview Tab | v1.1 | 0/? | Not started | - |
+| 8. Dashboard Shell and Infrastructure | v1.1 | 2/2 | Complete | 2026-02-26 |
+| 9. Overview Tab | v1.1 | 0/2 | Planning | - |
 | 10. Log Viewer Tab | v1.1 | 0/? | Not started | - |
 | 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
 | 12. Pool Management Tab | v1.1 | 0/? | Not started | - |
