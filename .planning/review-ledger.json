@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "entry_id": "1772096624810-d9cjep",
+      "gate": "plan",
+      "phase": "8",
+      "review_id": "3a0609db-4571-4507-89d2-38f1c2bab87a",
+      "status": "approved",
+      "artifact_hash": "1df583a86fdfdc909243e7f54b680299fe89dc7a1e8a2083ff4c6861c2d4f458",
+      "note": "manual_bypass_reviewer_workspace_routing_bug",
+      "recorded_at": "2026-02-26T09:03:44.810Z"
+    }
+  ],
+  "overrides": [],
+  "updated_at": "2026-02-26T09:03:44.811Z"
+}
