@@ -183,10 +183,9 @@ function populateDropdown(files: LogFile[]): void {
     select.appendChild(reviewerGroup);
   }
 
-  // Auto-select first file (most recent since API returns sorted by mtime desc)
-  const firstOption = select.querySelector('optgroup option') as HTMLOptionElement | null;
-  if (firstOption) {
-    select.value = firstOption.value;
+  // Auto-select most recent file (API returns sorted by mtime desc)
+  if (files.length > 0) {
+    select.value = files[0].name;
   }
 }
 
