@@ -56,6 +56,37 @@
 
 - [ ] **OBSV-01**: User can see proposals flowing through the broker in real-time by watching the reviewer's terminal or querying status tools
 
+## v1.1 Requirements
+
+Requirements for Web Dashboard milestone. Each maps to roadmap phases 8+.
+
+### Dashboard Infrastructure
+
+- [ ] **DASH-01**: Broker serves a web dashboard on a /dashboard route embedded in the existing FastMCP server, no separate process needed
+- [ ] **DASH-02**: Dashboard UI is built using frontend-design skill for production-grade, distinctive interface quality
+
+### Overview
+
+- [ ] **OVER-01**: Dashboard displays broker status and running configuration (address, uptime, version, config settings)
+- [ ] **OVER-02**: Dashboard displays aggregate review stats (total reviews, approval rate, avg review time) reusing get_review_stats data
+- [ ] **OVER-03**: Dashboard displays active reviewer subprocesses with status, current review, and per-reviewer stats
+
+### Log Viewer
+
+- [ ] **LOGS-01**: Dashboard lists and displays broker and reviewer JSONL log files from disk
+- [ ] **LOGS-02**: Dashboard streams new log entries in real-time as they are written (live tail)
+
+### Review Browser
+
+- [ ] **REVW-01**: Dashboard lists reviews with status and category filtering and sortable columns
+- [ ] **REVW-02**: Dashboard displays review detail including intent, unified diff, verdicts, and metadata
+- [ ] **REVW-03**: Dashboard displays the full discussion thread for a review
+
+### Pool Management
+
+- [ ] **POOL-01**: Dashboard displays reviewer pool status (each subprocess: status, reviews completed, uptime, current review)
+- [ ] **POOL-02**: Dashboard displays aggregate token usage accumulated across all reviewer subprocesses over broker lifetime
+
 ## v2 Requirements
 
 ### Enhanced Review
@@ -83,6 +114,9 @@
 | Review bot / linting integration | Broker is communication channel, not CI system; security risk |
 | Remote/cloud deployment | Local-only by design; no SaaS dependency |
 | OpenCode/Gemini runtime support | Claude Code + reviewer only for v1 |
+| Log level filtering | Deferred — live tail + file browsing sufficient for v1.1 |
+| Spawn/kill reviewers from UI | Deferred — MCP tools and CLI sufficient for v1.1 |
+| REST API as separate layer | Implicit in dashboard routes; no separate API versioning needed |
 
 ## Traceability
 
@@ -123,10 +157,11 @@
 | RLMC-08 | Phase 7 | Complete |
 
 **Coverage:**
-- v1 requirements: 33 total
-- Mapped to phases: 33
-- Unmapped: 0
+- v1.0 requirements: 33 total (31 complete, 2 pending)
+- v1.1 requirements: 12 total
+- Mapped to phases: 33 (v1.1 mapping pending roadmap creation)
+- Unmapped: 12 (v1.1 — will be mapped during roadmap creation)
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-17 after Phase 4 completion*
+*Last updated: 2026-02-25 after v1.1 requirements definition*
