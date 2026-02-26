@@ -1,2 +1,6 @@
 *.bak
 **/*.bak
+*.bak*
+**/*.bak*
+get-shit-done/CHANGELOG.md
+get-shit-done/VERSION

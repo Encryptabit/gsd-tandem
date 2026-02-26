@@ -28,3 +28,9 @@ __pycache__/
 .planning/codex_review_broker.sqlite3
 .planning/codex_review_broker.sqlite3-wal
 .planning/codex_review_broker.sqlite3-shm
+
+# Local backup artifacts
+*.bak
+*.bak*
+get-shit-done/CHANGELOG.md
+get-shit-done/VERSION
