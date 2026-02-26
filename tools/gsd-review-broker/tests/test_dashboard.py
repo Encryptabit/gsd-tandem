@@ -134,6 +134,7 @@ def sse_route(app):
 async def test_dashboard_sse_endpoint(sse_route):
     """GET /dashboard/events returns SSE stream with connected event."""
     request = MagicMock()
+    request.query_params = {}
     resp = await sse_route(request)
 
     assert resp.media_type == "text/event-stream"
@@ -153,12 +154,15 @@ async def test_dashboard_sse_endpoint(sse_route):
 
 async def test_dashboard_sse_heartbeat(sse_route):
     """SSE endpoint sends overview_update after connected, then periodic updates."""
-    # Use a very short heartbeat interval for testing
+    # Use very short intervals for testing
     original_interval = dashboard.SSE_HEARTBEAT_INTERVAL
+    original_tail_interval = dashboard.SSE_LOG_TAIL_INTERVAL
     dashboard.SSE_HEARTBEAT_INTERVAL = 0.05  # 50ms
+    dashboard.SSE_LOG_TAIL_INTERVAL = 0.02  # 20ms
 
     try:
         request = MagicMock()
+        request.query_params = {}
         resp = await sse_route(request)
         body_iter = resp.body_iterator
 
@@ -177,6 +181,7 @@ async def test_dashboard_sse_heartbeat(sse_route):
         await body_iter.aclose()
     finally:
         dashboard.SSE_HEARTBEAT_INTERVAL = original_interval
+        dashboard.SSE_LOG_TAIL_INTERVAL = original_tail_interval
 
 
 def test_dashboard_sse_content_type(client):
@@ -365,6 +370,7 @@ async def test_sse_sends_overview_update(overview_ctx):
         assert sse_handler is not None, "SSE route not found"
 
         request = MagicMock()
+        request.query_params = {}
         resp = await sse_handler(request)
         body_iter = resp.body_iterator
 
@@ -388,3 +394,245 @@ async def test_sse_sends_overview_update(overview_ctx):
         await body_iter.aclose()
     finally:
         dashboard.SSE_HEARTBEAT_INTERVAL = original_interval
+
+
+
+# ---- Log API tests ----
+
+
+async def test_log_listing_empty(overview_ctx):
+    """API returns empty list when log directories do not exist."""
+    import os
+
+    # Point env vars to non-existent directories
+    original_broker = os.environ.get("BROKER_LOG_DIR")
+    original_reviewer = os.environ.get("BROKER_REVIEWER_LOG_DIR")
+    os.environ["BROKER_LOG_DIR"] = "/nonexistent/broker-logs"
+    os.environ["BROKER_REVIEWER_LOG_DIR"] = "/nonexistent/reviewer-logs"
+
+    try:
+        from starlette.testclient import TestClient
+
+        app = mcp.http_app(transport="streamable-http", stateless_http=True)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/dashboard/api/logs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"files": []}
+    finally:
+        if original_broker is not None:
+            os.environ["BROKER_LOG_DIR"] = original_broker
+        else:
+            os.environ.pop("BROKER_LOG_DIR", None)
+        if original_reviewer is not None:
+            os.environ["BROKER_REVIEWER_LOG_DIR"] = original_reviewer
+        else:
+            os.environ.pop("BROKER_REVIEWER_LOG_DIR", None)
+
+
+async def test_log_listing_with_files(overview_ctx, tmp_path, monkeypatch):
+    """API returns file listing from both broker-logs/ and reviewer-logs/ dirs."""
+    import time as time_mod
+
+    broker_dir = tmp_path / "broker-logs"
+    broker_dir.mkdir()
+    reviewer_dir = tmp_path / "reviewer-logs"
+    reviewer_dir.mkdir()
+
+    # Create sample log files
+    broker_log = broker_dir / "broker.jsonl"
+    broker_log.write_text(
+        '{"ts":"2026-02-26T12:00:00.000Z","level":"info","message":"test"}\n',
+        encoding="utf-8",
+    )
+
+    reviewer_log = reviewer_dir / "reviewer-1.jsonl"
+    reviewer_log.write_text(
+        '{"ts":"2026-02-26T12:00:00.000Z","event":"reviewer_output","message":"test"}\n',
+        encoding="utf-8",
+    )
+
+    # Create a rotated log file
+    rotated = broker_dir / "broker.jsonl.1"
+    rotated.write_text(
+        '{"ts":"2026-02-25T12:00:00.000Z","level":"info","message":"old"}\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("BROKER_LOG_DIR", str(broker_dir))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_DIR", str(reviewer_dir))
+
+    from starlette.testclient import TestClient
+
+    app = mcp.http_app(transport="streamable-http", stateless_http=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/dashboard/api/logs")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    files = data["files"]
+    assert len(files) == 3
+
+    # Check all files have required fields
+    for f in files:
+        assert "name" in f
+        assert "size" in f
+        assert "modified" in f
+        assert "source" in f
+        assert isinstance(f["size"], int)
+        assert f["size"] > 0
+
+    # Check sources
+    sources = {f["name"]: f["source"] for f in files}
+    assert sources["broker.jsonl"] == "broker"
+    assert sources["broker.jsonl.1"] == "broker"
+    assert sources["reviewer-1.jsonl"] == "reviewer"
+
+
+async def test_log_file_read(overview_ctx, tmp_path, monkeypatch):
+    """Reading a JSONL log file returns parsed entries."""
+    broker_dir = tmp_path / "broker-logs"
+    broker_dir.mkdir()
+
+    log_file = broker_dir / "broker.jsonl"
+    lines = [
+        '{"ts":"2026-02-26T12:00:00.000Z","level":"info","logger":"gsd_review_broker","caller_tag":"broker","message":"Server started on 0.0.0.0:8321"}',
+        '{"ts":"2026-02-26T12:00:01.000Z","level":"info","logger":"gsd_review_broker","caller_tag":"proposer","message":"Review created: abc-123"}',
+        '{"ts":"2026-02-26T12:00:02.000Z","level":"warn","logger":"gsd_review_broker","caller_tag":"broker","message":"Slow query detected"}',
+    ]
+    log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("BROKER_LOG_DIR", str(broker_dir))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_DIR", str(tmp_path / "nonexistent"))
+
+    from starlette.testclient import TestClient
+
+    app = mcp.http_app(transport="streamable-http", stateless_http=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/dashboard/api/logs/broker.jsonl")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["filename"] == "broker.jsonl"
+    assert data["source"] == "broker"
+    assert len(data["entries"]) == 3
+    assert data["entries"][0]["message"] == "Server started on 0.0.0.0:8321"
+    assert data["entries"][1]["caller_tag"] == "proposer"
+    assert data["entries"][2]["level"] == "warn"
+    assert isinstance(data["size"], int)
+    assert data["size"] > 0
+
+
+async def test_log_file_read_not_found(overview_ctx, tmp_path, monkeypatch):
+    """Request for nonexistent log file returns 404."""
+    broker_dir = tmp_path / "broker-logs"
+    broker_dir.mkdir()
+
+    monkeypatch.setenv("BROKER_LOG_DIR", str(broker_dir))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_DIR", str(tmp_path / "nonexistent"))
+
+    from starlette.testclient import TestClient
+
+    app = mcp.http_app(transport="streamable-http", stateless_http=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/dashboard/api/logs/nonexistent.jsonl")
+    assert resp.status_code == 404
+
+
+async def test_log_file_path_traversal(overview_ctx, tmp_path, monkeypatch):
+    """Path traversal attempts on log file endpoint return 404."""
+    broker_dir = tmp_path / "broker-logs"
+    broker_dir.mkdir()
+
+    # Create a file outside log dir that an attacker might target
+    secret = tmp_path / "secret.txt"
+    secret.write_text("sensitive data", encoding="utf-8")
+
+    monkeypatch.setenv("BROKER_LOG_DIR", str(broker_dir))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_DIR", str(tmp_path / "nonexistent"))
+
+    from starlette.testclient import TestClient
+
+    app = mcp.http_app(transport="streamable-http", stateless_http=True)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    traversal_paths = [
+        "/dashboard/api/logs/../../etc/passwd",
+        "/dashboard/api/logs/../secret.txt",
+        "/dashboard/api/logs/..\\secret.txt",
+    ]
+    for path in traversal_paths:
+        resp = client.get(path)
+        assert resp.status_code == 404, f"Path traversal not blocked for {path}"
+
+
+async def test_sse_log_tail(overview_ctx, tmp_path, monkeypatch):
+    """SSE with ?tail=filename streams new log entries."""
+    import json as json_mod
+
+    broker_dir = tmp_path / "broker-logs"
+    broker_dir.mkdir()
+
+    log_file = broker_dir / "broker.jsonl"
+    # Start with one entry
+    initial_entry = '{"ts":"2026-02-26T12:00:00.000Z","level":"info","message":"initial"}'
+    log_file.write_text(initial_entry + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("BROKER_LOG_DIR", str(broker_dir))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_DIR", str(tmp_path / "nonexistent"))
+
+    # Use very short intervals for testing
+    original_heartbeat = dashboard.SSE_HEARTBEAT_INTERVAL
+    original_tail = dashboard.SSE_LOG_TAIL_INTERVAL
+    dashboard.SSE_HEARTBEAT_INTERVAL = 100  # Don't fire overview updates during test
+    dashboard.SSE_LOG_TAIL_INTERVAL = 0.02  # 20ms for fast tail checking
+
+    try:
+        app = mcp.http_app(transport="streamable-http", stateless_http=True)
+        # Get the SSE route handler
+        sse_handler = None
+        for route in app.routes:
+            if hasattr(route, "path") and route.path == "/dashboard/events":
+                sse_handler = route.endpoint
+                break
+        assert sse_handler is not None, "SSE route not found"
+
+        request = MagicMock()
+        request.query_params = {"tail": "broker.jsonl"}
+        resp = await sse_handler(request)
+        body_iter = resp.body_iterator
+
+        # First chunk: connected event
+        first = await body_iter.__anext__()
+        assert "event: connected" in first
+
+        # Second chunk: initial overview_update
+        second = await body_iter.__anext__()
+        assert "overview_update" in second
+
+        # Now write a new entry to the log file
+        new_entry = '{"ts":"2026-02-26T12:00:05.000Z","level":"info","message":"new entry"}'
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(new_entry + "\n")
+
+        # Wait for log_tail event (should arrive within a few ticks)
+        found_tail = False
+        for _ in range(50):  # Up to ~1 second at 20ms intervals
+            chunk = await asyncio.wait_for(body_iter.__anext__(), timeout=2.0)
+            if "log_tail" in chunk:
+                found_tail = True
+                # Parse the SSE data
+                json_str = chunk.replace("data: ", "").strip()
+                payload = json_mod.loads(json_str)
+                assert payload["type"] == "log_tail"
+                assert len(payload["entries"]) >= 1
+                messages = [e["message"] for e in payload["entries"]]
+                assert "new entry" in messages
+                break
+
+        assert found_tail, "Never received log_tail event"
+
+        await body_iter.aclose()
+    finally:
+        dashboard.SSE_HEARTBEAT_INTERVAL = original_heartbeat
+        dashboard.SSE_LOG_TAIL_INTERVAL = original_tail

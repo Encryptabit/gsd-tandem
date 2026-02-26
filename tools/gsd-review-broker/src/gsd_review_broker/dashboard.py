@@ -420,10 +420,33 @@ def register_dashboard_routes(mcp: object) -> None:
 
     @mcp.custom_route("/dashboard/events", methods=["GET"])  # type: ignore[union-attr]
     async def dashboard_events(request: Request) -> Response:
-        """SSE endpoint for real-time dashboard data push."""
+        """SSE endpoint for real-time dashboard data push.
+
+        Supports optional ?tail={filename} query parameter for streaming new
+        log entries as they are written to disk.
+        """
+        tail_filename = request.query_params.get("tail")
 
         async def event_stream() -> asyncio.AsyncIterator[str]:
             logger.info("Dashboard SSE client connected")
+            # Log tail state
+            tail_pos: int | None = None
+            tail_path: Path | None = None
+
+            # Resolve tail file if requested
+            if tail_filename:
+                result = _resolve_log_file(tail_filename)
+                if result is not None:
+                    tail_path, _ = result
+                    # Start from end of file
+                    try:
+                        tail_pos = tail_path.stat().st_size
+                    except OSError:
+                        tail_pos = 0
+                else:
+                    # File doesn't exist yet -- set path for later retry
+                    tail_pos = 0
+
             try:
                 yield 'event: connected\ndata: {"status": "connected"}\n\n'
 
@@ -435,16 +458,57 @@ def register_dashboard_routes(mcp: object) -> None:
                 except Exception:
                     logger.exception("Failed to build initial overview data for SSE")
 
+                tick = 0
                 while True:
-                    await asyncio.sleep(SSE_HEARTBEAT_INTERVAL)
-                    # Push overview update on each heartbeat interval
-                    try:
-                        overview_data = await _build_overview_data()
-                        overview_data["type"] = "overview_update"
-                        yield f"data: {json.dumps(overview_data)}\n\n"
-                    except Exception:
-                        logger.exception("Failed to build overview data for SSE")
-                        yield "event: heartbeat\ndata: {}\n\n"
+                    await asyncio.sleep(SSE_LOG_TAIL_INTERVAL)
+                    tick += SSE_LOG_TAIL_INTERVAL
+
+                    # Check for log tail updates every SSE_LOG_TAIL_INTERVAL seconds
+                    if tail_filename and tail_pos is not None:
+                        try:
+                            # Re-resolve on each tick in case file appeared
+                            if tail_path is None or not tail_path.is_file():
+                                result = _resolve_log_file(tail_filename)
+                                if result is not None:
+                                    tail_path, _ = result
+                                    tail_pos = 0
+
+                            if tail_path is not None and tail_path.is_file():
+                                current_size = tail_path.stat().st_size
+                                if current_size < tail_pos:
+                                    # File was rotated/truncated - reset to start
+                                    tail_pos = 0
+                                if current_size > tail_pos:
+                                    # New data available
+                                    with open(tail_path, "r", encoding="utf-8", errors="replace") as f:
+                                        f.seek(tail_pos)
+                                        new_data = f.read()
+                                        tail_pos = f.tell()
+                                    entries = []
+                                    for line in new_data.splitlines():
+                                        line = line.strip()
+                                        if not line:
+                                            continue
+                                        try:
+                                            entries.append(json.loads(line))
+                                        except json.JSONDecodeError:
+                                            continue
+                                    if entries:
+                                        payload = {"type": "log_tail", "entries": entries}
+                                        yield f"data: {json.dumps(payload)}\n\n"
+                        except OSError:
+                            pass  # File access error, skip this tick
+
+                    # Push overview update every SSE_HEARTBEAT_INTERVAL seconds
+                    if tick >= SSE_HEARTBEAT_INTERVAL:
+                        tick = 0
+                        try:
+                            overview_data = await _build_overview_data()
+                            overview_data["type"] = "overview_update"
+                            yield f"data: {json.dumps(overview_data)}\n\n"
+                        except Exception:
+                            logger.exception("Failed to build overview data for SSE")
+                            yield "event: heartbeat\ndata: {}\n\n"
             except asyncio.CancelledError:
                 logger.info("Dashboard SSE client disconnected")
                 return
