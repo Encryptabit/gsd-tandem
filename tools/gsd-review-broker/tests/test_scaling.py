@@ -484,6 +484,79 @@ async def test_dead_process_cleanup(
     assert row["status"] == "terminated"
 
 
+async def test_dead_process_reclaims_claimed_review_then_terminates(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    reviewer_id = "dead-r2"
+    await _insert_reviewer(ctx, reviewer_id, session_token=pool.session_token, status="active")
+    created = await _create_review(ctx, intent="claimed-then-dead")
+    claim = await claim_review.fn(review_id=created["review_id"], reviewer_id=reviewer_id, ctx=ctx)
+    assert "error" not in claim
+
+    dead = _FakeProcess(pid=9989)
+    dead.returncode = 0
+    pool._processes[reviewer_id] = dead
+    await _check_dead_processes(ctx.lifespan_context)
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status, claimed_by FROM reviews WHERE id = ?",
+        (created["review_id"],),
+    )
+    review_row = await cursor.fetchone()
+    assert review_row["status"] == "pending"
+    assert review_row["claimed_by"] is None
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status FROM reviewers WHERE id = ?",
+        (reviewer_id,),
+    )
+    reviewer_row = await cursor.fetchone()
+    assert reviewer_row["status"] == "terminated"
+    assert reviewer_id not in pool._processes
+
+
+async def test_dead_process_with_open_changes_requested_stays_draining(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    reviewer_id = "dead-r3"
+    await _insert_reviewer(ctx, reviewer_id, session_token=pool.session_token, status="active")
+    created = await _create_review(ctx, intent="changes-requested-then-dead")
+    claim = await claim_review.fn(review_id=created["review_id"], reviewer_id=reviewer_id, ctx=ctx)
+    assert "error" not in claim
+    verdict = await submit_verdict.fn(
+        review_id=created["review_id"],
+        verdict="changes_requested",
+        reason="needs fix",
+        reviewer_id=reviewer_id,
+        claim_generation=claim["claim_generation"],
+        ctx=ctx,
+    )
+    assert "error" not in verdict
+
+    dead = _FakeProcess(pid=9990)
+    dead.returncode = 0
+    pool._processes[reviewer_id] = dead
+    await _check_dead_processes(ctx.lifespan_context)
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status, claimed_by FROM reviews WHERE id = ?",
+        (created["review_id"],),
+    )
+    review_row = await cursor.fetchone()
+    assert review_row["status"] == "changes_requested"
+    assert review_row["claimed_by"] == reviewer_id
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status FROM reviewers WHERE id = ?",
+        (reviewer_id,),
+    )
+    reviewer_row = await cursor.fetchone()
+    assert reviewer_row["status"] == "draining"
+    assert reviewer_id not in pool._processes
+
+
 async def test_reject_claim_for_draining_reviewer(ctx: MockContext) -> None:
     await _insert_reviewer(ctx, "r-draining", session_token="x", status="draining")
     created = await _create_review(ctx)
@@ -566,6 +639,40 @@ async def test_terminate_draining_reviewer_after_reclaim(ctx: MockContext) -> No
     cursor = await ctx.lifespan_context.db.execute("SELECT status FROM reviewers WHERE id='r-a'")
     row = await cursor.fetchone()
     assert row["status"] == "terminated"
+
+
+async def test_revise_changes_requested_finalizes_draining_reviewer(ctx: MockContext) -> None:
+    await _insert_reviewer(ctx, "r-drain", session_token="x", status="active")
+    created = await _create_review(ctx, intent="needs revision")
+    claim = await claim_review.fn(review_id=created["review_id"], reviewer_id="r-drain", ctx=ctx)
+    await submit_verdict.fn(
+        review_id=created["review_id"],
+        verdict="changes_requested",
+        reason="fix this",
+        reviewer_id="r-drain",
+        claim_generation=claim["claim_generation"],
+        ctx=ctx,
+    )
+    await ctx.lifespan_context.db.execute(
+        "UPDATE reviewers SET status='draining' WHERE id='r-drain'",
+    )
+
+    revised = await create_review.fn(
+        review_id=created["review_id"],
+        intent="revised implementation",
+        agent_type="gsd-executor",
+        agent_role="proposer",
+        phase="7",
+        ctx=ctx,
+    )
+    assert revised.get("revised") is True
+
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status, terminated_at FROM reviewers WHERE id='r-drain'",
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "terminated"
+    assert row["terminated_at"] is not None
 
 
 async def test_no_termination_when_other_claims_remain(ctx: MockContext) -> None:

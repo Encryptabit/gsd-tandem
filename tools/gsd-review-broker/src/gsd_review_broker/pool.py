@@ -264,6 +264,7 @@ class ReviewerPool:
         reviewer_id: str,
         *,
         cancel_tasks: bool,
+        close_writer: bool = True,
     ) -> None:
         tasks = self._stream_tasks.pop(reviewer_id, [])
         if cancel_tasks:
@@ -272,10 +273,11 @@ class ReviewerPool:
         if tasks:
             with contextlib.suppress(Exception):
                 await asyncio.gather(*tasks, return_exceptions=True)
-        writer = self._log_writers.pop(reviewer_id, None)
-        if writer is not None:
-            with contextlib.suppress(Exception):
-                await writer.close()
+        if close_writer:
+            writer = self._log_writers.pop(reviewer_id, None)
+            if writer is not None:
+                with contextlib.suppress(Exception):
+                    await writer.close()
 
     async def spawn_reviewer(
         self,
@@ -484,6 +486,64 @@ class ReviewerPool:
             "remaining_open_reviews": remaining_open_reviews,
             "terminated": terminated,
         }
+
+    async def mark_dead_process_draining(
+        self,
+        reviewer_id: str,
+        db: aiosqlite.Connection,
+        write_lock: asyncio.Lock,
+        *,
+        exit_code: int | None,
+        open_reviews: int,
+    ) -> None:
+        """Detach exited subprocess and keep reviewer draining while open reviews remain."""
+        proc = self._processes.pop(reviewer_id, None)
+        self._draining.add(reviewer_id)
+        await self._cleanup_reviewer_logging(
+            reviewer_id,
+            cancel_tasks=False,
+            close_writer=False,
+        )
+        await self._write_reviewer_log(
+            reviewer_id,
+            event="reviewer_process_exited",
+            pid=proc.pid if proc is not None else None,
+            exit_code=exit_code,
+            message=f"open_reviews={open_reviews}",
+        )
+
+        async with write_lock:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    "SELECT status FROM reviewers WHERE id = ?",
+                    (reviewer_id,),
+                )
+                row = await cursor.fetchone()
+                old_status = row["status"] if row is not None else None
+                await db.execute(
+                    """UPDATE reviewers
+                       SET status = 'draining', last_active_at = datetime('now')
+                       WHERE id = ? AND status != 'terminated'""",
+                    (reviewer_id,),
+                )
+                await record_event(
+                    db,
+                    None,
+                    "reviewer_drain_start",
+                    actor="pool-manager",
+                    old_status=old_status,
+                    new_status="draining",
+                    metadata={
+                        "reviewer_id": reviewer_id,
+                        "reason": "process_exited_with_open_reviews",
+                        "exit_code": exit_code,
+                        "open_reviews": open_reviews,
+                    },
+                )
+                await db.execute("COMMIT")
+            except Exception:
+                await _rollback_quietly(db)
 
     async def _terminate_reviewer(
         self,

@@ -177,11 +177,13 @@ async def create_review(
 
     # --- Revision flow ---
     if review_id is not None:
+        detached_reviewer_id: str | None = None
         async with app.write_lock:
             try:
                 await app.db.execute("BEGIN IMMEDIATE")
                 cursor = await app.db.execute(
-                    "SELECT status, project FROM reviews WHERE id = ?", (review_id,)
+                    "SELECT status, project, claimed_by FROM reviews WHERE id = ?",
+                    (review_id,),
                 )
                 row = await cursor.fetchone()
                 if row is None:
@@ -189,6 +191,7 @@ async def create_review(
                     return {"error": f"Review not found: {review_id}"}
                 current_status = ReviewStatus(row["status"])
                 resolved_project = project if project is not None else row["project"]
+                detached_reviewer_id = row["claimed_by"]
                 allow_pending_revision = False
                 if current_status == ReviewStatus.PENDING:
                     history_cursor = await app.db.execute(
@@ -240,6 +243,11 @@ async def create_review(
             except Exception as exc:
                 await _rollback_quietly(app)
                 return _db_error("create_review", exc)
+        await _maybe_finalize_draining_reviewer(
+            app,
+            detached_reviewer_id,
+            trigger="review_revised",
+        )
         app.notifications.notify(review_id)
         app.notifications.notify(QUEUE_TOPIC)
         logger.info(

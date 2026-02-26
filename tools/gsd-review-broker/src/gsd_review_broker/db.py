@@ -381,9 +381,47 @@ async def _check_dead_processes(ctx: AppContext) -> None:
     pool = ctx.pool
     if pool is None:
         return
+    from gsd_review_broker.tools import reclaim_review  # local import avoids cycle
+
     for reviewer_id, proc in list(pool._processes.items()):
-        if proc.returncode is not None:
-            await pool._terminate_reviewer(reviewer_id, ctx.db, ctx.write_lock)
+        if proc.returncode is None:
+            continue
+
+        # If a reviewer process exits while it still owns open reviews, preserve
+        # lifecycle semantics and recover claimed work immediately.
+        cursor = await ctx.db.execute(
+            """SELECT id, status
+               FROM reviews
+               WHERE claimed_by = ?
+                 AND status != 'closed'""",
+            (reviewer_id,),
+        )
+        attached_rows = await cursor.fetchall()
+
+        for row in attached_rows:
+            if row["status"] == "claimed":
+                await reclaim_review(row["id"], ctx, reason="reviewer_process_exit")
+
+        cursor = await ctx.db.execute(
+            """SELECT COUNT(*) AS n
+               FROM reviews
+               WHERE claimed_by = ?
+                 AND status != 'closed'""",
+            (reviewer_id,),
+        )
+        remaining_row = await cursor.fetchone()
+        remaining_open = int(remaining_row["n"]) if remaining_row is not None else 0
+        if remaining_open > 0:
+            await pool.mark_dead_process_draining(
+                reviewer_id,
+                ctx.db,
+                ctx.write_lock,
+                exit_code=proc.returncode,
+                open_reviews=remaining_open,
+            )
+            continue
+
+        await pool._terminate_reviewer(reviewer_id, ctx.db, ctx.write_lock)
 
 
 async def _check_reactive_scaling(ctx: AppContext) -> None:
