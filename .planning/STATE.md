@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 ## Current Position
 
 Phase: 8 of 12 (Dashboard Shell and Infrastructure)
-Plan: 1 of 2 complete
-Status: Executing — Plan 08-01 (Astro shell) complete, Plan 08-02 (static serving) pending
-Last activity: 2026-02-26 — Completed 08-01-PLAN.md (dashboard shell and infrastructure)
+Plan: 2 of 2 complete
+Status: Phase 8 complete — Ready for Phase 9 (Overview tab)
+Last activity: 2026-02-26 — Completed 08-02-PLAN.md (Python static serving + SSE endpoint)
 
-Progress: [====================............] 62% (v1.0 complete, v1.1 phase 8 plan 1/2 done)
+Progress: [======================..........] 67% (v1.0 complete, v1.1 phase 8 done, phase 9 next)
 
 ## Performance Metrics
 
@@ -26,6 +26,7 @@ Progress: [====================............] 62% (v1.0 complete, v1.1 phase 8 pl
 **v1.1 Velocity:**
 - Previous 08-01 and 08-02 implementations scrapped (inline HTML approach abandoned)
 - 08-01 (Astro shell): 5 min, 2 tasks, 16 files
+- 08-02 (static serving + SSE): 10 min, 2 tasks, 3 files
 
 ## Accumulated Context
 
@@ -42,6 +43,9 @@ v1.1 decisions:
 - is:global CSS for ThemeToggle (Astro scoped CSS cannot reach html[data-theme] from child component)
 - SSE singleton on window.gsdSSE for cross-script EventSource sharing
 - Custom event bus (sse-status events) for decoupled component communication
+- Direct async generator for SSE heartbeat (no sse-starlette wrapper needed)
+- Route registration order: /dashboard/events before catch-all to prevent interception
+- Direct handler testing for SSE endpoints (bypasses TestClient stream buffering)
 
 Key v1.0 decisions carried forward:
 
@@ -72,5 +76,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 08-01-PLAN.md (Astro dashboard shell with design system, sidebar nav, theme toggle, tabs, SSE)
-Resume notes: Execute 08-02-PLAN.md next (Python static file serving and SSE endpoint wiring).
+Stopped at: Completed 08-02-PLAN.md (Python static file serving + SSE endpoint + dashboard route tests)
+Resume notes: Phase 8 complete. Plan Phase 9 next (Overview tab with status, stats, active reviewers).
