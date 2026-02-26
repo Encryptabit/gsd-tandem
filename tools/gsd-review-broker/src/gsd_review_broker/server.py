@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import contextvars
 import json
 import logging
@@ -21,6 +22,9 @@ BROKER_LOG_MAX_BYTES_ENV_VAR = "BROKER_LOG_MAX_BYTES"
 BROKER_LOG_BACKUPS_ENV_VAR = "BROKER_LOG_BACKUPS"
 DEFAULT_BROKER_LOG_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_BROKER_LOG_BACKUPS = 5
+_PERIODIC_SKIP_REASON = "reason=capacity_sufficient"
+_PERIODIC_SKIP_DECISION = "decision=skip"
+_PERIODIC_SCALE_PREFIX = "reactive_scale_check[periodic] ->"
 
 mcp = FastMCP(
     "gsd-review-broker",
@@ -64,6 +68,18 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(payload, separators=(",", ":"))
 
 
+class _ConsoleNoiseFilter(logging.Filter):
+    """Suppress low-signal periodic scale-check skip lines from console output."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not message.startswith(_PERIODIC_SCALE_PREFIX):
+            return True
+        if _PERIODIC_SKIP_DECISION not in message:
+            return True
+        return _PERIODIC_SKIP_REASON not in message
+
+
 def _default_user_config_dir() -> Path:
     """Resolve a cross-platform user config directory for broker state."""
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
@@ -102,7 +118,7 @@ def _read_positive_int_env(name: str, default: int, minimum: int) -> int:
     return value
 
 
-def _configure_logging() -> None:
+def _configure_logging(*, verbose: bool = False) -> None:
     """Configure concise broker logs with stream and structured rotating logfile handlers."""
     logger = logging.getLogger("gsd_review_broker")
     logger.setLevel(logging.INFO)
@@ -123,6 +139,18 @@ def _configure_logging() -> None:
             )
         )
         logger.addHandler(handler)
+
+    for handler in logger.handlers:
+        if not getattr(handler, "_gsd_broker_stream_handler", False):
+            continue
+        existing_filter = getattr(handler, "_gsd_console_noise_filter", None)
+        if existing_filter is not None:
+            handler.removeFilter(existing_filter)
+            handler._gsd_console_noise_filter = None  # type: ignore[attr-defined]
+        if not verbose:
+            noise_filter = _ConsoleNoiseFilter()
+            handler.addFilter(noise_filter)
+            handler._gsd_console_noise_filter = noise_filter  # type: ignore[attr-defined]
 
     if not any(getattr(handler, "_gsd_broker_file_handler", False) for handler in logger.handlers):
         log_dir = _resolve_broker_log_dir()
@@ -153,7 +181,7 @@ def _configure_logging() -> None:
 _configure_logging()
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Run the broker server on port 8321.
 
     Set BROKER_HOST to override bind host.
@@ -166,7 +194,15 @@ def main() -> None:
       Windows: %APPDATA%/gsd-review-broker/codex_review_broker.sqlite3
     - Set BROKER_DB_PATH to override with an explicit SQLite file path.
     """
-    _configure_logging()
+    parser = argparse.ArgumentParser(prog="gsd-review-broker")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show low-signal periodic scaling diagnostics in console output.",
+    )
+    args = parser.parse_args(argv)
+
+    _configure_logging(verbose=args.verbose)
     host = os.environ.get("BROKER_HOST", "0.0.0.0")
     uvicorn_log_level = os.environ.get("BROKER_UVICORN_LOG_LEVEL", "warning")
     mcp.run(
