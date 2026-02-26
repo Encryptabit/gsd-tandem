@@ -42,6 +42,9 @@ caller_tag: contextvars.ContextVar[str] = contextvars.ContextVar("caller_tag", d
 # Import tools to register them with @mcp.tool.
 # This import MUST come AFTER mcp is created to avoid circular imports.
 from gsd_review_broker import tools  # noqa: F401, E402
+from gsd_review_broker.dashboard import register_dashboard_routes  # noqa: E402
+
+register_dashboard_routes(mcp)
 
 
 class _CallerFormatter(logging.Formatter):
