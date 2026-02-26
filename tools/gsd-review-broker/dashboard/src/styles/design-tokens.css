@@ -1,0 +1,121 @@
+/*
+ * GSD Tandem Dashboard - Design Tokens
+ *
+ * Dark theme default with neon cyan/teal accent.
+ * Full monospace typography throughout.
+ */
+
+:root {
+  /* Dark theme as default */
+  --color-bg: #1a1a1a;
+  --color-surface: #242424;
+  --color-surface-hover: #2e2e2e;
+  --color-border: #3a3a3a;
+  --color-text: #e0e0e0;
+  --color-text-secondary: #888888;
+  --color-accent: #00e5ff;
+  --color-accent-hover: #33ecff;
+  --color-accent-dim: rgba(0, 229, 255, 0.15);
+  --color-success: #00e676;
+  --color-warning: #ffab40;
+  --color-error: #ff5252;
+
+  /* Typography */
+  --font-mono: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', monospace;
+  --font-size-xs: 0.7rem;
+  --font-size-sm: 0.8rem;
+  --font-size-base: 0.9rem;
+  --font-size-lg: 1.1rem;
+  --font-size-xl: 1.4rem;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --border-radius: 4px;
+  --transition-speed: 150ms;
+}
+
+/* Dark theme (explicit selector for toggle) */
+[data-theme="dark"] {
+  --color-bg: #1a1a1a;
+  --color-surface: #242424;
+  --color-surface-hover: #2e2e2e;
+  --color-border: #3a3a3a;
+  --color-text: #e0e0e0;
+  --color-text-secondary: #888888;
+  --color-accent: #00e5ff;
+  --color-accent-hover: #33ecff;
+  --color-accent-dim: rgba(0, 229, 255, 0.15);
+  --color-success: #00e676;
+  --color-warning: #ffab40;
+  --color-error: #ff5252;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --color-bg: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-surface-hover: #eeeeee;
+  --color-border: #d0d0d0;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666666;
+  --color-accent: #0097a7;
+  --color-accent-hover: #00838f;
+  --color-accent-dim: rgba(0, 151, 167, 0.12);
+  --color-success: #2e7d32;
+  --color-warning: #ef6c00;
+  --color-error: #c62828;
+}
+
+/* Global resets */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--border-radius);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}

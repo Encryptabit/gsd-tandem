@@ -1,0 +1,50 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="GSD Tandem Dashboard">
+  <section id="tab-overview" class="tab-panel">
+    <h2 class="tab-heading">Overview</h2>
+    <p class="tab-placeholder">System status and metrics will appear here.</p>
+  </section>
+
+  <section id="tab-logs" class="tab-panel" style="display:none">
+    <h2 class="tab-heading">Logs</h2>
+    <p class="tab-placeholder">Reviewer log viewer coming soon.</p>
+  </section>
+
+  <section id="tab-reviews" class="tab-panel" style="display:none">
+    <h2 class="tab-heading">Reviews</h2>
+    <p class="tab-placeholder">Review browser coming soon.</p>
+  </section>
+
+  <section id="tab-pool" class="tab-panel" style="display:none">
+    <h2 class="tab-heading">Pool</h2>
+    <p class="tab-placeholder">Pool management coming soon.</p>
+  </section>
+</Layout>
+
+<style>
+  .tab-panel {
+    animation: fadeIn var(--transition-speed) ease;
+  }
+
+  .tab-heading {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 var(--spacing-md) 0;
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .tab-placeholder {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+</style>

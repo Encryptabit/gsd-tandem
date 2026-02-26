@@ -1,0 +1,158 @@
+---
+import ConnectionStatus from './ConnectionStatus.astro';
+import ThemeToggle from './ThemeToggle.astro';
+---
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <span class="brand-text">GSD Tandem</span>
+  </div>
+
+  <nav class="sidebar-nav" id="sidebar-nav">
+    <button class="nav-item active" data-tab="overview" type="button">
+      <span class="nav-label">Overview</span>
+      <span class="nav-badge" data-badge="overview">--</span>
+    </button>
+    <button class="nav-item" data-tab="logs" type="button">
+      <span class="nav-label">Logs</span>
+      <span class="nav-badge" data-badge="logs">--</span>
+    </button>
+    <button class="nav-item" data-tab="reviews" type="button">
+      <span class="nav-label">Reviews</span>
+      <span class="nav-badge" data-badge="reviews">--</span>
+    </button>
+    <button class="nav-item" data-tab="pool" type="button">
+      <span class="nav-label">Pool</span>
+      <span class="nav-badge" data-badge="pool">--</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <ConnectionStatus />
+    <ThemeToggle />
+  </div>
+</aside>
+
+<style>
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    background-color: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    overflow-y: auto;
+  }
+
+  .sidebar-brand {
+    padding: var(--spacing-lg) var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .brand-text {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--color-accent);
+    letter-spacing: 0.5px;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: var(--spacing-sm) 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin: 0 var(--spacing-sm);
+    border: none;
+    border-radius: var(--border-radius);
+    background: none;
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--transition-speed) ease;
+    text-align: left;
+    border-left: 3px solid transparent;
+  }
+
+  .nav-item:hover {
+    background-color: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+
+  .nav-item.active {
+    background-color: var(--color-accent-dim);
+    color: var(--color-accent);
+    border-left-color: var(--color-accent);
+  }
+
+  .nav-label {
+    font-weight: 500;
+  }
+
+  .nav-badge {
+    font-size: var(--font-size-xs);
+    background-color: var(--color-surface-hover);
+    color: var(--color-text-secondary);
+    padding: 1px 6px;
+    border-radius: 10px;
+    min-width: 24px;
+    text-align: center;
+  }
+
+  .nav-item.active .nav-badge {
+    background-color: var(--color-accent-dim);
+    color: var(--color-accent);
+  }
+
+  .sidebar-footer {
+    padding: var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  /* Responsive: collapse sidebar on narrow screens */
+  @media (max-width: 768px) {
+    .sidebar {
+      width: 60px;
+      overflow: hidden;
+    }
+
+    .sidebar-brand {
+      padding: var(--spacing-sm);
+      text-align: center;
+    }
+
+    .brand-text {
+      font-size: var(--font-size-sm);
+      writing-mode: vertical-rl;
+    }
+
+    .nav-label {
+      display: none;
+    }
+
+    .nav-badge {
+      display: none;
+    }
+
+    .nav-item {
+      justify-content: center;
+      margin: 0 var(--spacing-xs);
+      padding: var(--spacing-sm);
+    }
+  }
+</style>

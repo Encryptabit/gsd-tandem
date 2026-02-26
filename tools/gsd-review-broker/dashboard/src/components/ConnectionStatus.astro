@@ -1,0 +1,71 @@
+---
+/* ConnectionStatus: SSE connection status indicator */
+---
+
+<div class="connection-status" id="connection-status">
+  <span class="status-dot disconnected" id="status-dot"></span>
+  <span class="status-text" id="status-text">Disconnected</span>
+</div>
+
+<style>
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background-color var(--transition-speed) ease;
+  }
+
+  .status-dot.connected {
+    background-color: var(--color-success);
+    box-shadow: 0 0 4px var(--color-success);
+  }
+
+  .status-dot.disconnected {
+    background-color: var(--color-error);
+  }
+
+  .status-dot.reconnecting {
+    background-color: var(--color-warning);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .status-text {
+    font-family: var(--font-mono);
+  }
+</style>
+
+<script>
+  const dot = document.getElementById('status-dot')!;
+  const text = document.getElementById('status-text')!;
+
+  window.addEventListener('sse-status', ((event: CustomEvent<{ status: string }>) => {
+    const { status } = event.detail;
+    dot.className = 'status-dot ' + status;
+
+    switch (status) {
+      case 'connected':
+        text.textContent = 'Connected';
+        break;
+      case 'disconnected':
+        text.textContent = 'Disconnected';
+        break;
+      case 'reconnecting':
+        text.textContent = 'Reconnecting...';
+        break;
+    }
+  }) as EventListener);
+</script>

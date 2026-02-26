@@ -1,0 +1,50 @@
+---
+import Sidebar from '../components/Sidebar.astro';
+import '../styles/design-tokens.css';
+
+interface Props {
+  title?: string;
+}
+
+const { title = 'GSD Tandem Dashboard' } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <script is:inline>
+      // Theme initialization: runs synchronously to prevent FOUC
+      (function() {
+        const saved = localStorage.getItem('gsd-dashboard-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <Sidebar />
+    <main class="main-content">
+      <slot />
+    </main>
+  </body>
+</html>
+
+<style>
+  .main-content {
+    margin-left: var(--sidebar-width);
+    min-height: 100vh;
+    padding: var(--spacing-lg);
+  }
+
+  @media (max-width: 768px) {
+    .main-content {
+      margin-left: 60px;
+      padding: var(--spacing-md);
+    }
+  }
+</style>
