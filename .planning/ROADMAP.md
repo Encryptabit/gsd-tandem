@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### v1.1 Web Dashboard
 
 - [x] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker (completed 2026-02-26)
-- [x] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list (completed 2026-02-26)
+- [x] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list (completed 2026-02-26)
 - [ ] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail
 - [ ] **Phase 11: Review Browser Tab** - Review list with filtering, detail view with diffs and verdicts, discussion threads
 - [ ] **Phase 12: Pool Management Tab** - Reviewer subprocess status display and aggregate token usage tracking
@@ -198,7 +198,11 @@ Plans:
   1. Dashboard lists available JSONL log files from both broker-logs/ and reviewer-logs/ directories with file names, sizes, and modification timestamps
   2. User can select a log file and view its entries rendered as a readable, scrollable list (not raw JSON)
   3. User can activate a live tail mode that streams new log entries into the view as they are written to disk, without manual refresh
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 10-01-PLAN.md -- Python API endpoints (log listing, log file reading, SSE log tail) with tests
+- [ ] 10-02-PLAN.md -- Astro LogViewer component, logs.ts data script (rendering, tail, search, auto-scroll), build to dist/
 
 ### Phase 11: Review Browser Tab
 **Goal**: User can navigate the full history of reviews, inspect any review's diff and metadata, and read the complete discussion thread
@@ -237,6 +241,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 7. Reviewer Lifecycle Management | v1.0 | 4/4 | Complete | 2026-02-18 |
 | 8. Dashboard Shell and Infrastructure | v1.1 | 2/2 | Complete | 2026-02-26 |
 | 9. Overview Tab | v1.1 | Complete    | 2026-02-26 | - |
-| 10. Log Viewer Tab | v1.1 | 0/? | Not started | - |
+| 10. Log Viewer Tab | v1.1 | 0/2 | Not started | - |
 | 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
 | 12. Pool Management Tab | v1.1 | 0/? | Not started | - |
