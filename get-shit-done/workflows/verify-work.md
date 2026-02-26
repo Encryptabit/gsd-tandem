@@ -298,45 +298,84 @@ Clear Current Test section:
 
 **Step 1: Check tandem config:**
 ```bash
-TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
 ```
 
-If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to commit as normal.
+If `REVIEW_ENABLED=false`: Skip this gate entirely. Proceed to commit as normal.
 
-**Step 2: Submit finalized UAT for review:**
-Read the full finalized UAT content (`{phase_num}-UAT.md`) into memory.
-Resolve project scope for the review:
+**Step 2: Build finalized UAT payload + diff for review:**
+Read the full finalized UAT content (`{phase_num}-UAT.md`) into memory as `FINAL_UAT_MD_CONTENT`.
+
 ```bash
-PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+UAT_PATH=".planning/phases/XX-name/{phase_num}-UAT.md"
+mkdir -p .planning/tmp
+TMP_UAT=".planning/tmp/{phase_num}-UAT.review.md"
+printf '%s' "$FINAL_UAT_MD_CONTENT" > "$TMP_UAT"
+if [ -f "$UAT_PATH" ]; then
+  UAT_DIFF=$(git diff --no-index -- "$UAT_PATH" "$TMP_UAT" || true)
+else
+  UAT_DIFF=$(git diff --no-index -- /dev/null "$TMP_UAT" || true)
+fi
+UAT_DIFF_HASH=$(printf '%s' "$UAT_DIFF" | sha256sum | awk '{print $1}')
 ```
+
+If `UAT_DIFF` is empty: record skipped gate, skip broker submission, continue.
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate verify --phase "{phase_num}" --status skipped --hash "${UAT_DIFF_HASH}" --note "no_uat_diff"
+```
+
+**Step 3: Submit finalized UAT for review:**
 
 Call `mcp__gsdreview__create_review` with:
 - `intent`: "Phase {phase_num} UAT verification: {passed} passed, {issues} issues"
 - `agent_type`: "gsd-verifier"
 - `agent_role`: "proposer"
 - `phase`: "{phase_num}"
-- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
+- `project`: `${PROJECT_NAME}`
 - `category`: "verification"
 - `description`: The full finalized UAT.md content (complete markdown)
-- `diff`: null (UAT is content, not diffs)
+- `diff`: `${UAT_DIFF}`
 
-**Step 3: Wait for verdict (long-poll):**
+**Step 4: Wait for verdict (long-poll):**
 Loop:
-  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
-  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to commit.
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true, caller_id="proposer-${PROJECT_NAME}")`
+  - If `status == "approved"`:
+    ```bash
+    mcp__gsdreview__close_review(review_id=ID, closer_role="proposer")
+    node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate verify --phase "{phase_num}" --review-id "${ID}" --hash "${UAT_DIFF_HASH}" --status approved
+    ```
+    Proceed to commit.
   - If `status == "changes_requested"`:
     1. Read `verdict_reason`
-    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
+    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID, caller_id="proposer-${PROJECT_NAME}")`
     3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists, merge those edits into revised UAT content and call `mcp__gsdreview__accept_counter_patch(review_id=ID)`.
-    4. Resubmit revised content via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_UAT_MD_CONTENT, ...)`.
-    5. Return to polling.
+    4. Rebuild diff + hash:
+       ```bash
+       printf '%s' "$REVISED_UAT_MD_CONTENT" > "$TMP_UAT"
+       if [ -f "$UAT_PATH" ]; then
+         UAT_DIFF=$(git diff --no-index -- "$UAT_PATH" "$TMP_UAT" || true)
+       else
+         UAT_DIFF=$(git diff --no-index -- /dev/null "$TMP_UAT" || true)
+       fi
+       UAT_DIFF_HASH=$(printf '%s' "$UAT_DIFF" | sha256sum | awk '{print $1}')
+       ```
+    5. Resubmit revised content via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_UAT_MD_CONTENT, diff=UAT_DIFF, ...)`.
+    6. Return to polling.
 
-**Step 4: After approval, proceed to commit (existing behavior).**
+**Step 5: After approval, enforce gate and proceed to commit (existing behavior).**
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate verify --phase "{phase_num}" --hash "${UAT_DIFF_HASH}"
+```
 
-**Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
-- Log warning: "Review broker unreachable. Proceeding in solo mode."
-- Set TANDEM_ENABLED=false for the remainder of this execution
-- Proceed to commit normally
+**Error handling (fail-closed default):**
+- If broker call fails: stop and ask user to restore broker connectivity.
+- If user explicitly approves bypass, use audited override:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review override --gate verify --phase "{phase_num}" --reason "manual bypass approved by user"
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate verify --phase "{phase_num}"
+  ```
 </tandem_review_gate>
 
 Commit the UAT file:

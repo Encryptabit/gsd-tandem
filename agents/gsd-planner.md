@@ -1006,10 +1006,11 @@ Present breakdown with wave structure. Wait for confirmation in interactive mode
 
 **Step 1: Check tandem config:**
 ```bash
-TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
 ```
 
-If `TANDEM_ENABLED=false`: Skip this section entirely. Proceed to write PLAN.md as normal.
+If `REVIEW_ENABLED=false`: Skip this section entirely. Proceed to write PLAN.md as normal.
 
 **Step 2: Submit plan for review:**
 Resolve project scope for the review:
@@ -1031,14 +1032,14 @@ Call `mcp__gsdreview__create_review` with:
 **Step 3: Wait for verdict (long-poll):**
 Loop:
   Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
-  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write PLAN.md to disk.
+  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID, closer_role="proposer")`. Proceed to write PLAN.md to disk.
   - If `status == "changes_requested"`: Read `verdict_reason`, revise PLAN.md content, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_PLAN_CONTENT, ...)`, then return to polling.
 
 **Step 4: After approval, write PLAN.md to disk using Write tool (existing behavior).**
 
 **Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
 - Log warning: "Review broker unreachable. Proceeding in solo mode."
-- Set TANDEM_ENABLED=false for the remainder of this execution
+- Set REVIEW_ENABLED=false for the remainder of this execution
 - Proceed to write PLAN.md normally
 
 **Revision limit:** After 3 revision rounds, warn: "Plan review has gone through 3 rounds. Consider discussing directly with the reviewer." Continue the loop but surface the warning.

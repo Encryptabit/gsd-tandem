@@ -35,9 +35,6 @@ class TestValidTransitions:
     def test_valid_transition_approved_to_closed(self) -> None:
         validate_transition(ReviewStatus.APPROVED, ReviewStatus.CLOSED)
 
-    def test_valid_transition_changes_requested_to_closed(self) -> None:
-        validate_transition(ReviewStatus.CHANGES_REQUESTED, ReviewStatus.CLOSED)
-
     def test_valid_transition_changes_requested_to_pending(self) -> None:
         validate_transition(ReviewStatus.CHANGES_REQUESTED, ReviewStatus.PENDING)
 
@@ -68,6 +65,10 @@ class TestInvalidTransitions:
     def test_invalid_approved_to_pending(self) -> None:
         with pytest.raises(ValueError, match="Invalid transition"):
             validate_transition(ReviewStatus.APPROVED, ReviewStatus.PENDING)
+
+    def test_invalid_changes_requested_to_closed(self) -> None:
+        with pytest.raises(ValueError, match="Invalid transition"):
+            validate_transition(ReviewStatus.CHANGES_REQUESTED, ReviewStatus.CLOSED)
 
     def test_invalid_claimed_to_closed(self) -> None:
         with pytest.raises(ValueError, match="Invalid transition"):

@@ -21,21 +21,16 @@ INIT=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs init execute-phase "${PHAS
 
 Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`.
 
+Capture phase start ref (used by orchestrator review gate):
+```bash
+PHASE_START_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
+```
+
 **If `phase_found` is false:** Error — phase directory not found.
 **If `plan_count` is 0:** Error — no plans found in phase.
 **If `state_exists` is false but `.planning/` exists:** Offer reconstruct or continue.
 
 When `parallelization` is false, plans within a wave execute sequentially.
-
-**Tandem config loading:**
-
-```bash
-TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
-```
-
-When `TANDEM_ENABLED=true`, force `PARALLELIZATION=false` to ensure clean per-plan diffs. Log: "Tandem mode active -- wave parallelism disabled for clean per-plan diffs."
-
-This is necessary because `git diff ${PLAN_START_REF}..HEAD` must isolate exactly one plan's changes. Parallel plan execution would interleave commits from multiple plans, making per-plan diffs impossible to construct.
 </step>
 
 <step name="handle_branching">
@@ -153,69 +148,6 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 
 3. **Wait for all agents in wave to complete.**
 
-3a. **Per-plan review gate** (only when `TANDEM_ENABLED=true`):
-
-   For each completed plan in the wave (sequentially, since parallelism is forced off):
-
-   Resolve project scope once for the wave:
-   ```bash
-   PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
-   ```
-
-   1. Record `PLAN_START_REF` before spawning the plan's executor (add this before step 2).
-      ```bash
-      PLAN_START_REF=$(git rev-parse HEAD)
-      ```
-   2. After executor returns, capture diff:
-      ```bash
-      PLAN_DIFF=$(git diff ${PLAN_START_REF}..HEAD)
-      ```
-   3. If `PLAN_DIFF` is empty, skip review gate for this plan.
-   4. Submit to broker:
-      ```
-      mcp__gsdreview__create_review(
-        intent="Plan {plan_id}: {plan_objective}",
-        agent_type="gsd-executor",
-        agent_role="proposer",
-        phase="{phase_number}",
-        plan="{plan_number}",
-        project=PROJECT_SCOPE,
-        category="code_change",
-        diff=PLAN_DIFF,
-        skip_diff_validation=true
-      )
-      ```
-   5. Long-poll for verdict:
-      ```
-      Loop:
-        status = mcp__gsdreview__get_review_status(review_id=ID, wait=true)
-        - approved: mcp__gsdreview__close_review(review_id=ID), proceed
-        - changes_requested:
-          1) Read verdict_reason.
-          2) Fetch full proposal:
-             PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)
-          3) If PROPOSAL.counter_patch_status == "pending" and counter_patch exists:
-             - Try apply reviewer patch directly:
-               TMP_PATCH=".planning/tmp/review-${ID}.patch"
-               mkdir -p .planning/tmp
-               printf '%s' "$PROPOSAL.counter_patch" > "$TMP_PATCH"
-               if git apply --check "$TMP_PATCH"; then
-                 git apply "$TMP_PATCH"
-                 mcp__gsdreview__accept_counter_patch(review_id=ID)
-               else
-                 mcp__gsdreview__reject_counter_patch(review_id=ID)
-               fi
-          4) If patch was not applicable or additional fixes are needed:
-             - Re-spawn executor with verdict_reason (+ counter_patch context if present).
-          5) Recompute PLAN_DIFF and resubmit with same review_id:
-             PLAN_DIFF=$(git diff ${PLAN_START_REF}..HEAD)
-             mcp__gsdreview__create_review(review_id=ID, intent=..., diff=PLAN_DIFF, ...)
-          6) Return to polling loop.
-      ```
-   6. On broker connection failure on first call: warn and set `TANDEM_ENABLED=false`
-      for remainder of execution (solo mode fallback). Log:
-      "Review broker unreachable. Falling back to solo mode for this session."
-
 4. **Report completion — spot-check claims first:**
 
    For each SUMMARY.md:
@@ -317,6 +249,100 @@ After all waves:
 ### Issues Encountered
 [Aggregate from SUMMARYs, or "None"]
 ```
+</step>
+
+<step name="orchestrator_tandem_review">
+Parent-context review gate for execution changes.
+
+**Why:** Task() subagents may not have custom MCP tool access. Orchestrator submits one phase-level review after execution.
+
+Check tandem config:
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+```
+
+Skip this step if:
+- `REVIEW_ENABLED=false`
+- (`PHASE_START_REF` is empty AND you record a skipped gate)
+
+If `PHASE_START_REF` is empty, record skipped gate and continue:
+```bash
+PHASE_DIFF=""
+PHASE_DIFF_HASH=$(printf '%s' "$PHASE_DIFF" | sha256sum | awk '{print $1}')
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate execute --phase "${PHASE_NUMBER}" --status skipped --hash "${PHASE_DIFF_HASH}" --note "missing_phase_start_ref"
+```
+
+Build phase diff:
+```bash
+PHASE_DIFF=$(git diff "${PHASE_START_REF}..HEAD")
+PHASE_DIFF_HASH=$(printf '%s' "$PHASE_DIFF" | sha256sum | awk '{print $1}')
+```
+
+If `PHASE_DIFF` is empty: record skipped gate, skip broker submission, and continue.
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate execute --phase "${PHASE_NUMBER}" --status skipped --hash "${PHASE_DIFF_HASH}" --note "no_phase_diff"
+```
+
+Build summary payload:
+```bash
+SUMMARY_PAYLOAD=$(cat "${PHASE_DIR}"/*-SUMMARY.md 2>/dev/null)
+```
+
+Submit review from orchestrator:
+- `mcp__gsdreview__create_review`
+- `intent`: `Phase ${PHASE_NUMBER} execution: ${PHASE_NAME}`
+- `agent_type`: `gsd-executor`
+- `agent_role`: `proposer`
+- `phase`: `${PHASE_NUMBER}`
+- `project`: `${PROJECT_NAME}`
+- `category`: `code_change`
+- `description`: `${SUMMARY_PAYLOAD}`
+- `diff`: `${PHASE_DIFF}`
+
+Wait for verdict:
+- `mcp__gsdreview__get_review_status(review_id=ID, wait=true, caller_id="proposer-${PROJECT_NAME}")` in a loop
+- On `approved`: `mcp__gsdreview__close_review(review_id=ID, closer_role="proposer")`, then:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate execute --phase "${PHASE_NUMBER}" --review-id "${ID}" --hash "${PHASE_DIFF_HASH}" --status approved
+  ```
+  continue.
+- On `changes_requested`:
+  1. Fetch full proposal: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID, caller_id="proposer-${PROJECT_NAME}")`
+  2. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` is non-empty:
+     - Attempt direct apply:
+       ```bash
+       TMP_PATCH=".planning/tmp/review-${ID}.patch"
+       mkdir -p .planning/tmp
+       printf '%s' "$PROPOSAL.counter_patch" > "$TMP_PATCH"
+       if git apply --check "$TMP_PATCH"; then
+         git apply "$TMP_PATCH"
+         mcp__gsdreview__accept_counter_patch(review_id=ID)
+       else
+         mcp__gsdreview__reject_counter_patch(review_id=ID)
+       fi
+       ```
+  3. Incorporate `verdict_reason` (and counter-patch context if present) with focused follow-up edits.
+  4. Rebuild payloads and resubmit:
+     ```bash
+     PHASE_DIFF=$(git diff "${PHASE_START_REF}..HEAD")
+     PHASE_DIFF_HASH=$(printf '%s' "$PHASE_DIFF" | sha256sum | awk '{print $1}')
+     SUMMARY_PAYLOAD=$(cat "${PHASE_DIR}"/*-SUMMARY.md 2>/dev/null)
+     ```
+     Call `mcp__gsdreview__create_review(review_id=ID, intent=..., description=SUMMARY_PAYLOAD, diff=PHASE_DIFF, ...)`
+  5. Continue polling.
+
+Error handling (fail-closed default):
+- If first broker call fails: stop and ask user to restore broker connectivity.
+- If user explicitly approves bypass, use audited override:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review override --gate execute --phase "${PHASE_NUMBER}" --reason "manual bypass approved by user"
+  ```
+- Always enforce before leaving this step:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate execute --phase "${PHASE_NUMBER}" --hash "${PHASE_DIFF_HASH}"
+  ```
 </step>
 
 <step name="close_parent_artifacts">
@@ -440,6 +466,11 @@ Gap closure cycle: `/gsd:plan-phase {X} --gaps` reads VERIFICATION.md → create
 **Mark phase complete and update all tracking files:**
 
 ```bash
+if [ -n "${PHASE_DIFF_HASH:-}" ]; then
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate execute --phase "${PHASE_NUMBER}" --hash "${PHASE_DIFF_HASH}"
+else
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate execute --phase "${PHASE_NUMBER}"
+fi
 COMPLETION=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs phase complete "${PHASE_NUMBER}")
 ```
 

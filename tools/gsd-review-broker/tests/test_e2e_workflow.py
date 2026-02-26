@@ -118,7 +118,7 @@ class TestHappyPathLifecycle:
         assert stats["approval_rate_pct"] == 100.0
 
         # Step 5: Close
-        closed = await close_review.fn(review_id=rid, ctx=ctx)
+        closed = await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
         assert closed["status"] == "closed"
 
         # Verify final timeline
@@ -183,7 +183,7 @@ class TestRevisionCycle:
         await submit_verdict.fn(
             review_id=rid, verdict="approved", reason="Fixed", ctx=ctx
         )
-        await close_review.fn(review_id=rid, ctx=ctx)
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
 
         # Verify final timeline has full revision cycle
         timeline = await get_review_timeline.fn(review_id=rid, ctx=ctx)
@@ -210,7 +210,7 @@ class TestRevisionCycle:
 
 
 class TestCounterPatchFlow:
-    """Counter-patch flow: create -> claim -> changes_requested+counter_patch -> accept -> close."""
+    """Counter-patch flow: create -> claim -> changes_requested+counter_patch -> accept -> revise -> approve -> close."""
 
     async def test_counter_patch_flow_with_observability(self, ctx: MockContext) -> None:
         """Counter-patch accept flow generates correct audit trail."""
@@ -243,8 +243,20 @@ class TestCounterPatchFlow:
             result = await accept_counter_patch.fn(review_id=rid, ctx=ctx)
         assert result["counter_patch_status"] == "accepted"
 
-        # Close after counter-patch acceptance (status is still changes_requested, close it)
-        await close_review.fn(review_id=rid, ctx=ctx)
+        # Counter-patch acceptance keeps status at changes_requested.
+        # Proposer must resubmit revision, then get approval before close.
+        revised = await create_review.fn(
+            intent="revised via accepted counter patch",
+            agent_type="gsd-executor",
+            agent_role="proposer",
+            phase="1",
+            review_id=rid,
+            ctx=ctx,
+        )
+        assert revised["status"] == "pending"
+        await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
+        await submit_verdict.fn(review_id=rid, verdict="approved", reason="LGTM", ctx=ctx)
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
 
         # Verify timeline has counter_patch_accepted
         timeline = await get_review_timeline.fn(review_id=rid, ctx=ctx)
@@ -253,6 +265,7 @@ class TestCounterPatchFlow:
         assert "review_created" in types
         assert "review_claimed" in types
         assert "verdict_submitted" in types
+        assert "review_revised" in types
         assert "review_closed" in types
 
         # Verify audit log has counter-patch events
@@ -297,7 +310,7 @@ class TestMultiCategoryData:
         await submit_verdict.fn(
             review_id=plan["review_id"], verdict="approved", ctx=ctx
         )
-        await close_review.fn(review_id=plan["review_id"], ctx=ctx)
+        await close_review.fn(review_id=plan["review_id"], closer_role="proposer", ctx=ctx)
 
         # Verify stats
         stats = await get_review_stats.fn(ctx=ctx)
@@ -367,7 +380,7 @@ class TestObservabilityConsistency:
         rid = created["review_id"]
         await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
         await submit_verdict.fn(review_id=rid, verdict="approved", ctx=ctx)
-        await close_review.fn(review_id=rid, ctx=ctx)
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
 
         timeline = await get_review_timeline.fn(review_id=rid, ctx=ctx)
         log = await get_audit_log.fn(review_id=rid, ctx=ctx)

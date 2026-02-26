@@ -164,6 +164,80 @@ AskUserQuestion([
 ])
 ```
 
+**Round 3 — Tandem review settings:**
+
+```
+AskUserQuestion([
+  {
+    header: "Tandem",
+    question: "Enable broker-backed tandem review gates?",
+    multiSelect: false,
+    options: [
+      { label: "Yes (Recommended)", description: "Require review verdicts before gated progression" },
+      { label: "No", description: "Disable tandem review gates" }
+    ]
+  },
+  {
+    header: "Fail Mode",
+    question: "If a required review is missing, should workflow block or warn?",
+    multiSelect: false,
+    options: [
+      { label: "Block (Recommended)", description: "Fail-closed — stop progression until review passes" },
+      { label: "Warn Only", description: "Fail-open — log warning and continue" }
+    ]
+  },
+  {
+    header: "Gate Scope",
+    question: "Which stages should require review approval?",
+    multiSelect: false,
+    options: [
+      { label: "All stages (Recommended)", description: "discuss + plan + execute + verify" },
+      { label: "Plan/Execute/Verify", description: "Skip discuss gate, keep other gates required" },
+      { label: "Execute only", description: "Only code execution gate is required" }
+    ]
+  },
+  {
+    header: "Execution",
+    question: "Wait for review approval before continuing execution?",
+    multiSelect: false,
+    options: [
+      { label: "Blocking (Recommended)", description: "Wait for approval before continuing" },
+      { label: "Optimistic", description: "Continue while review is pending" }
+    ]
+  },
+  {
+    header: "Granularity",
+    question: "How should tandem reviews be grouped?",
+    multiSelect: false,
+    options: [
+      { label: "Per Task (Recommended)", description: "Review each task-level unit of work" },
+      { label: "Per Plan", description: "Review per plan-level batch" }
+    ]
+  },
+  {
+    header: "Override",
+    question: "Allow manual review gate override command?",
+    multiSelect: false,
+    options: [
+      { label: "No (Recommended)", description: "Disallow manual bypasses" },
+      { label: "Yes", description: "Allow audited override via review override command" }
+    ]
+  }
+])
+```
+
+Map Round 3 answers to config:
+- `review.enabled`: Tandem answer (Yes=true, No=false)
+- `review.fail_mode`: Fail Mode (Block=`closed`, Warn Only=`open`)
+- `review.allow_override`: Override (No=false, Yes=true)
+- `execution_mode`: Execution (Blocking=`blocking`, Optimistic=`optimistic`)
+- `review_granularity`: Granularity (Per Task=`per_task`, Per Plan=`per_plan`)
+- `review.required_gates` from Gate Scope:
+  - All stages: `discuss/plan/execute/verify=true`
+  - Plan/Execute/Verify: `discuss=false`, `plan/execute/verify=true`
+  - Execute only: `execute=true`, `discuss/plan/verify=false`
+- If `review.enabled=false`, force all `review.required_gates.*=false` regardless of Gate Scope selection.
+
 Create `.planning/config.json` with mode set to "yolo":
 
 ```json
@@ -173,6 +247,33 @@ Create `.planning/config.json` with mode set to "yolo":
   "parallelization": true|false,
   "commit_docs": true|false,
   "model_profile": "quality|balanced|budget",
+  "review": {
+    "enabled": true|false,
+    "fail_mode": "closed|open",
+    "allow_override": true|false,
+    "required_gates": {
+      "discuss": true|false,
+      "plan": true|false,
+      "execute": true|false,
+      "verify": true|false
+    }
+  },
+  "review_granularity": "per_task|per_plan",
+  "execution_mode": "blocking|optimistic",
+  "reviewer_pool": {
+    "workspace_path": "auto",
+    "model": "gpt-5.3-codex",
+    "reasoning_effort": "high",
+    "wsl_distro": "Ubuntu",
+    "max_pool_size": 3,
+    "scaling_ratio": 3.0,
+    "idle_timeout_seconds": 300.0,
+    "max_ttl_seconds": 3600.0,
+    "claim_timeout_seconds": 1200.0,
+    "spawn_cooldown_seconds": 10.0,
+    "prompt_template_path": "reviewer_prompt.md",
+    "background_check_interval_seconds": 30.0
+  },
   "workflow": {
     "research": true|false,
     "plan_check": true|false,
@@ -183,6 +284,12 @@ Create `.planning/config.json` with mode set to "yolo":
 ```
 
 **If commit_docs = No:** Add `.planning/` to `.gitignore`.
+
+**Backfill required tandem/review defaults (safe no-op if already present):**
+
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section
+```
 
 **Commit config.json:**
 
@@ -463,6 +570,82 @@ questions: [
 ]
 ```
 
+**Round 3 — Tandem review settings:**
+
+These control review broker gates across discuss/plan/execute/verify.
+
+```
+questions: [
+  {
+    header: "Tandem",
+    question: "Enable broker-backed tandem review gates?",
+    multiSelect: false,
+    options: [
+      { label: "Yes (Recommended)", description: "Require review verdicts before gated progression" },
+      { label: "No", description: "Disable tandem review gates" }
+    ]
+  },
+  {
+    header: "Fail Mode",
+    question: "If a required review is missing, should workflow block or warn?",
+    multiSelect: false,
+    options: [
+      { label: "Block (Recommended)", description: "Fail-closed — stop progression until review passes" },
+      { label: "Warn Only", description: "Fail-open — log warning and continue" }
+    ]
+  },
+  {
+    header: "Gate Scope",
+    question: "Which stages should require review approval?",
+    multiSelect: false,
+    options: [
+      { label: "All stages (Recommended)", description: "discuss + plan + execute + verify" },
+      { label: "Plan/Execute/Verify", description: "Skip discuss gate, keep other gates required" },
+      { label: "Execute only", description: "Only code execution gate is required" }
+    ]
+  },
+  {
+    header: "Execution",
+    question: "Wait for review approval before continuing execution?",
+    multiSelect: false,
+    options: [
+      { label: "Blocking (Recommended)", description: "Wait for approval before continuing" },
+      { label: "Optimistic", description: "Continue while review is pending" }
+    ]
+  },
+  {
+    header: "Granularity",
+    question: "How should tandem reviews be grouped?",
+    multiSelect: false,
+    options: [
+      { label: "Per Task (Recommended)", description: "Review each task-level unit of work" },
+      { label: "Per Plan", description: "Review per plan-level batch" }
+    ]
+  },
+  {
+    header: "Override",
+    question: "Allow manual review gate override command?",
+    multiSelect: false,
+    options: [
+      { label: "No (Recommended)", description: "Disallow manual bypasses" },
+      { label: "Yes", description: "Allow audited override via review override command" }
+    ]
+  }
+]
+```
+
+Map Round 3 answers to config:
+- `review.enabled`: Tandem answer (Yes=true, No=false)
+- `review.fail_mode`: Fail Mode (Block=`closed`, Warn Only=`open`)
+- `review.allow_override`: Override (No=false, Yes=true)
+- `execution_mode`: Execution (Blocking=`blocking`, Optimistic=`optimistic`)
+- `review_granularity`: Granularity (Per Task=`per_task`, Per Plan=`per_plan`)
+- `review.required_gates` from Gate Scope:
+  - All stages: `discuss/plan/execute/verify=true`
+  - Plan/Execute/Verify: `discuss=false`, `plan/execute/verify=true`
+  - Execute only: `execute=true`, `discuss/plan/verify=false`
+- If `review.enabled=false`, force all `review.required_gates.*=false` regardless of Gate Scope selection.
+
 Create `.planning/config.json` with all settings:
 
 ```json
@@ -472,6 +655,33 @@ Create `.planning/config.json` with all settings:
   "parallelization": true|false,
   "commit_docs": true|false,
   "model_profile": "quality|balanced|budget",
+  "review": {
+    "enabled": true|false,
+    "fail_mode": "closed|open",
+    "allow_override": true|false,
+    "required_gates": {
+      "discuss": true|false,
+      "plan": true|false,
+      "execute": true|false,
+      "verify": true|false
+    }
+  },
+  "review_granularity": "per_task|per_plan",
+  "execution_mode": "blocking|optimistic",
+  "reviewer_pool": {
+    "workspace_path": "auto",
+    "model": "gpt-5.3-codex",
+    "reasoning_effort": "high",
+    "wsl_distro": "Ubuntu",
+    "max_pool_size": 3,
+    "scaling_ratio": 3.0,
+    "idle_timeout_seconds": 300.0,
+    "max_ttl_seconds": 3600.0,
+    "claim_timeout_seconds": 1200.0,
+    "spawn_cooldown_seconds": 10.0,
+    "prompt_template_path": "reviewer_prompt.md",
+    "background_check_interval_seconds": 30.0
+  },
   "workflow": {
     "research": true|false,
     "plan_check": true|false,
@@ -486,6 +696,12 @@ Create `.planning/config.json` with all settings:
 
 **If commit_docs = Yes:**
 - No additional gitignore entries needed
+
+**Backfill required tandem/review defaults (safe no-op if already present):**
+
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section
+```
 
 **Commit config.json:**
 
@@ -1102,7 +1318,7 @@ Exit skill and invoke SlashCommand("/gsd:discuss-phase 1 --auto")
 - [ ] Brownfield detection completed
 - [ ] Deep questioning completed (threads followed, not rushed)
 - [ ] PROJECT.md captures full context → **committed**
-- [ ] config.json has workflow mode, depth, parallelization → **committed**
+- [ ] config.json has workflow mode/depth/parallelization + tandem review settings → **committed**
 - [ ] Research completed (if selected) — 4 parallel agents spawned → **committed**
 - [ ] Requirements gathered (from research or conversation)
 - [ ] User scoped each category (v1/v2/out of scope)

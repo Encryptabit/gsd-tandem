@@ -366,46 +366,83 @@ mkdir -p ".planning/phases/${padded_phase}-${phase_slug}"
 **When:** After full CONTEXT.md content is built in-memory but BEFORE writing to disk.
 **Skip if:** tandem is disabled.
 
-**Step 1: Check tandem config:**
+**Step 1: Check review gate config:**
 ```bash
-TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
 ```
 
-If `TANDEM_ENABLED=false`: Skip this gate entirely. Proceed to write CONTEXT.md as normal.
+If `REVIEW_ENABLED=false`: Skip this gate entirely. Proceed to write CONTEXT.md as normal.
 
-**Step 2: Submit context for review:**
-Resolve project scope for the review:
+**Step 2: Build payload + diff for review:**
 ```bash
-PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+CONTEXT_PATH="${phase_dir}/${padded_phase}-CONTEXT.md"
+mkdir -p .planning/tmp
+TMP_CONTEXT=".planning/tmp/${padded_phase}-CONTEXT.review.md"
+printf '%s' "$CONTEXT_CONTENT" > "$TMP_CONTEXT"
+if [ -f "$CONTEXT_PATH" ]; then
+  CONTEXT_DIFF=$(git diff --no-index -- "$CONTEXT_PATH" "$TMP_CONTEXT" || true)
+else
+  CONTEXT_DIFF=$(git diff --no-index -- /dev/null "$TMP_CONTEXT" || true)
+fi
+CONTEXT_DIFF_HASH=$(printf '%s' "$CONTEXT_DIFF" | sha256sum | awk '{print $1}')
 ```
 
+If `CONTEXT_DIFF` is empty: record skipped gate, skip broker submission, continue.
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate discuss --phase "${phase_number}" --status skipped --hash "${CONTEXT_DIFF_HASH}" --note "no_context_diff"
+```
+
+**Step 3: Submit context for review:**
 Call `mcp__gsdreview__create_review` with:
 - `intent`: "Phase {phase_number} context: {phase_name}"
 - `agent_type`: "gsd-discuss"
 - `agent_role`: "proposer"
 - `phase`: "{phase_number}"
-- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
+- `project`: `${PROJECT_NAME}`
 - `category`: "handoff"
 - `description`: The full CONTEXT.md content that was built (complete markdown)
-- `diff`: null (context is content, not diffs)
+- `diff`: `${CONTEXT_DIFF}`
 
-**Step 3: Wait for verdict (long-poll):**
+**Step 4: Wait for verdict (long-poll):**
 Loop:
-  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
-  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to write CONTEXT.md to disk.
+  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true, caller_id="proposer-${PROJECT_NAME}")`
+  - If `status == "approved"`:
+    ```bash
+    mcp__gsdreview__close_review(review_id=ID, closer_role="proposer")
+    node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate discuss --phase "${phase_number}" --review-id "${ID}" --hash "${CONTEXT_DIFF_HASH}" --status approved
+    ```
+    Proceed to write CONTEXT.md to disk.
   - If `status == "changes_requested"`:
     1. Read `verdict_reason`
-    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
-    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists, merge those edits into revised CONTEXT content and call `mcp__gsdreview__accept_counter_patch(review_id=ID)`.
-    4. Resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=REVISED_CONTEXT_MD_CONTENT, ...)`.
-    5. Return to polling.
+    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID, caller_id="proposer-${PROJECT_NAME}")`
+    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists, merge those edits into the revised CONTEXT content and call `mcp__gsdreview__accept_counter_patch(review_id=ID)`.
+    4. Rebuild diff + hash:
+       ```bash
+       printf '%s' "$REVISED_CONTEXT_MD_CONTENT" > "$TMP_CONTEXT"
+       if [ -f "$CONTEXT_PATH" ]; then
+         CONTEXT_DIFF=$(git diff --no-index -- "$CONTEXT_PATH" "$TMP_CONTEXT" || true)
+       else
+         CONTEXT_DIFF=$(git diff --no-index -- /dev/null "$TMP_CONTEXT" || true)
+       fi
+       CONTEXT_DIFF_HASH=$(printf '%s' "$CONTEXT_DIFF" | sha256sum | awk '{print $1}')
+       ```
+    5. Resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., description=REVISED_CONTEXT_MD_CONTENT, diff=CONTEXT_DIFF, ...)`.
+    6. Return to polling.
 
-**Step 4: After approval, proceed to file write (existing behavior).**
+**Step 5: After approval, enforce gate and proceed to file write:**
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate discuss --phase "${phase_number}" --hash "${CONTEXT_DIFF_HASH}"
+```
 
-**Error handling:** If any `mcp__gsdreview__*` call fails with a connection error on the first attempt:
-- Log warning: "Review broker unreachable. Proceeding in solo mode."
-- Set TANDEM_ENABLED=false for the remainder of this execution
-- Proceed to write CONTEXT.md normally
+**Error handling (fail-closed default):**
+- If broker call fails: stop and ask user to restore broker connectivity.
+- If user explicitly approves bypass, use audited override:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review override --gate discuss --phase "${phase_number}" --reason "manual bypass approved by user"
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate discuss --phase "${phase_number}"
+  ```
 </tandem_review_gate>
 
 Write file.

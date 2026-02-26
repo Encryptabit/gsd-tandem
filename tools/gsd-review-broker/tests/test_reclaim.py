@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gsd_review_broker.tools import claim_review, create_review, reclaim_review, submit_verdict
+from gsd_review_broker.tools import (
+    claim_review,
+    close_review,
+    create_review,
+    reclaim_review,
+    submit_verdict,
+)
 
 if TYPE_CHECKING:
     from conftest import MockContext
@@ -297,6 +303,15 @@ async def test_drain_finalization_after_terminal_verdict(ctx: MockContext) -> No
         claim_generation=claim["claim_generation"],
         ctx=ctx,
     )
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status, terminated_at FROM reviewers WHERE id = ?",
+        ("reviewer-a",),
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "draining"
+    assert row["terminated_at"] is None
+
+    await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
     cursor = await ctx.lifespan_context.db.execute(
         "SELECT status, terminated_at FROM reviewers WHERE id = ?",
         ("reviewer-a",),

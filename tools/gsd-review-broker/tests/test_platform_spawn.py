@@ -48,6 +48,39 @@ def test_build_codex_argv_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert "exec codex exec" in argv[-1]
 
 
+def test_build_codex_argv_windows_translates_drive_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform_spawn.os, "name", "nt", raising=False)
+    monkeypatch.setattr(config_schema.os, "name", "nt", raising=False)
+    config = SpawnConfig(
+        workspace_path=r"C:\Projects\Code2Obsidian",
+        model="o4-mini",
+        reasoning_effort="high",
+        wsl_distro="Ubuntu",
+    )
+
+    argv = build_codex_argv(config)
+    assert "/mnt/c/Projects/Code2Obsidian" in argv[-1]
+    assert "C:\\Projects\\Code2Obsidian" not in argv[-1]
+
+
+def test_build_codex_argv_windows_keeps_wsl_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform_spawn.os, "name", "nt", raising=False)
+    monkeypatch.setattr(config_schema.os, "name", "nt", raising=False)
+    config = SpawnConfig(
+        workspace_path="/mnt/c/Projects/Code2Obsidian",
+        model="o4-mini",
+        reasoning_effort="high",
+        wsl_distro="Ubuntu",
+    )
+
+    argv = build_codex_argv(config)
+    assert "/mnt/c/Projects/Code2Obsidian" in argv[-1]
+
+
 def test_argv_is_list_of_strings(tmp_path: Path) -> None:
     argv = build_codex_argv(_config(tmp_path))
     assert all(isinstance(value, str) for value in argv)

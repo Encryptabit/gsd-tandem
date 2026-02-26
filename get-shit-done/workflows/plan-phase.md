@@ -1,5 +1,5 @@
 <purpose>
-Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification. Default flow: Research (if needed) -> Plan -> Verify -> Tandem review gate (if enabled) -> Done. Orchestrates gsd-phase-researcher, gsd-planner, and gsd-plan-checker agents with a revision loop (max 3 iterations).
+Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification. Default flow: Research (if needed) -> Plan -> Verify -> Done. Orchestrates gsd-phase-researcher, gsd-planner, and gsd-plan-checker agents with a revision loop (max 3 iterations).
 </purpose>
 
 <required_reading>
@@ -24,6 +24,8 @@ if [[ "$INIT_RAW" == @file:* ]]; then
 else
   INIT="$INIT_RAW"
 fi
+# Capture baseline ref so plan review uses a real diff across generated plan artifacts.
+PLAN_REVIEW_START_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
 ```
 
 Parse JSON for: `researcher_model`, `planner_model`, `checker_model`, `research_enabled`, `plan_checker_enabled`, `commit_docs`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`, `has_research`, `has_context`, `has_plans`, `plan_count`, `planning_exists`, `roadmap_exists`.
@@ -133,7 +135,7 @@ Write to: {phase_dir}/{phase_num}-RESEARCH.md
 ```
 Task(
   prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role and instructions.\n\n" + research_prompt,
-  subagent_type="general-purpose",
+  subagent_type="gsd-phase-researcher",
   model="{researcher_model}",
   description="Research Phase {phase}"
 )
@@ -223,7 +225,7 @@ Output consumed by /gsd:execute-phase. Plans need:
 ```
 Task(
   prompt="First, read ~/.claude/agents/gsd-planner.md for your role and instructions.\n\n" + filled_prompt,
-  subagent_type="general-purpose",
+  subagent_type="gsd-planner",
   model="{planner_model}",
   description="Plan Phase {phase}"
 )
@@ -327,7 +329,7 @@ Return what changed.
 ```
 Task(
   prompt="First, read ~/.claude/agents/gsd-planner.md for your role and instructions.\n\n" + revision_prompt,
-  subagent_type="general-purpose",
+  subagent_type="gsd-planner",
   model="{planner_model}",
   description="Revise Phase {phase} plans"
 )
@@ -341,60 +343,97 @@ Display: `Max iterations reached. {N} issues remain:` + issue list
 
 Offer: 1) Force proceed, 2) Provide guidance and retry, 3) Abandon
 
-## 13. Tandem Plan Review Gate
+## 13. Orchestrator Tandem Review Gate (Main Context)
 
-**When:** After plans are finalized (post-checker pass, override, or skip-verify path) but BEFORE final status and auto-advance routing.
-**Skip if:** tandem is disabled.
+Run review-broker gating in the parent command context. Do not delegate broker calls to Task() subagents.
 
-**Step 1: Check tandem config:**
+**Why:** Some Claude Task environments do not expose custom MCP tools to subagents. Parent context remains the reliable gatekeeper.
+
+**Check config:**
 ```bash
-TANDEM_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"tandem_enabled"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "false")
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
 ```
 
-If `TANDEM_ENABLED=false`: Skip this gate and proceed to step 14.
+If `REVIEW_ENABLED=false`: skip this step.
 
-**Step 2: Build review payload from final plans:**
-```bash
-PLANS_CONTENT=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
-```
+If `REVIEW_ENABLED=true`:
 
-If `PLANS_CONTENT` is empty: skip gate and proceed to step 14.
+1. Build plan payload and diff from current PLAN.md files:
+   ```bash
+   PLAN_PAYLOAD=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+   if [ -n "${PLAN_REVIEW_START_REF:-}" ]; then
+     PLAN_DIFF=$(git diff "${PLAN_REVIEW_START_REF}..HEAD" -- "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+   else
+     PLAN_DIFF=$(git diff -- "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+   fi
+   for plan_file in "${PHASE_DIR}"/*-PLAN.md; do
+     [ -f "$plan_file" ] || continue
+     if ! git ls-files --error-unmatch "$plan_file" >/dev/null 2>&1; then
+       PLAN_DIFF="${PLAN_DIFF}"$'\n'"$(git diff --no-index -- /dev/null "$plan_file" || true)"
+     fi
+   done
+   PLAN_DIFF_HASH=$(printf '%s' "$PLAN_DIFF" | sha256sum | awk '{print $1}')
+   ```
+2. If `PLAN_PAYLOAD` is empty: skip gate.
+3. If `PLAN_DIFF` is empty (no net PLAN artifact delta), record a skipped gate and continue:
+   ```bash
+   node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate plan --phase "${PHASE_NUMBER}" --status skipped --hash "${PLAN_DIFF_HASH}" --note "no_plan_diff"
+   ```
+4. Otherwise submit review from orchestrator:
+   - `mcp__gsdreview__create_review`
+   - `intent`: `Plan ${PHASE_NUMBER}: ${PHASE_NAME}`
+   - `agent_type`: `gsd-planner`
+   - `agent_role`: `proposer`
+   - `phase`: `${PHASE_NUMBER}`
+   - `project`: `${PROJECT_NAME}`
+   - `category`: `plan_review`
+   - `description`: `${PLAN_PAYLOAD}`
+   - `diff`: `${PLAN_DIFF}`
+5. Wait for reviewer verdict using long-poll:
+   - `mcp__gsdreview__get_review_status(review_id=ID, wait=true, caller_id="proposer-${PROJECT_NAME}")`
+6. On `approved`:
+   - `mcp__gsdreview__close_review(review_id=ID, closer_role="proposer")`
+   - `node ~/.claude/get-shit-done/bin/gsd-tools.cjs review record --gate plan --phase "${PHASE_NUMBER}" --review-id "${ID}" --hash "${PLAN_DIFF_HASH}" --status approved`
+   - Continue workflow.
+7. On `changes_requested`:
+   - Read `verdict_reason`
+   - Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID, caller_id="proposer-${PROJECT_NAME}")`
+   - If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists:
+     - Apply/merge the counter-patch edits into PLAN artifacts first
+     - Call `mcp__gsdreview__accept_counter_patch(review_id=ID)` once incorporated
+   - Run one planner revision pass (step 12 flow) using reviewer feedback + counter-patch content as required input
+   - Re-run checker (steps 10-11)
+   - Rebuild payload + diff + hash:
+     ```bash
+     PLAN_PAYLOAD=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+     if [ -n "${PLAN_REVIEW_START_REF:-}" ]; then
+       PLAN_DIFF=$(git diff "${PLAN_REVIEW_START_REF}..HEAD" -- "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+     else
+       PLAN_DIFF=$(git diff -- "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
+     fi
+     for plan_file in "${PHASE_DIR}"/*-PLAN.md; do
+       [ -f "$plan_file" ] || continue
+       if ! git ls-files --error-unmatch "$plan_file" >/dev/null 2>&1; then
+         PLAN_DIFF="${PLAN_DIFF}"$'\n'"$(git diff --no-index -- /dev/null "$plan_file" || true)"
+       fi
+     done
+     PLAN_DIFF_HASH=$(printf '%s' "$PLAN_DIFF" | sha256sum | awk '{print $1}')
+     ```
+   - Re-submit with `mcp__gsdreview__create_review(review_id=ID, ...)` using updated PLAN payload + diff
+   - Continue polling.
 
-Resolve project scope:
-```bash
-PROJECT_SCOPE=${GSD_REVIEW_PROJECT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
-```
-
-Call `mcp__gsdreview__create_review` with:
-- `intent`: "Phase {phase_number} plans: {phase_name}"
-- `agent_type`: "gsd-planner"
-- `agent_role`: "proposer"
-- `phase`: "{phase_number}"
-- `project`: `PROJECT_SCOPE` (or override with `GSD_REVIEW_PROJECT`)
-- `category`: "plan_review"
-- `description`: The full plan set content (`PLANS_CONTENT`)
-- `diff`: null (planning gate reviews artifact content)
-
-**Step 3: Wait for verdict (long-poll):**
-Loop:
-  Call `mcp__gsdreview__get_review_status(review_id=ID, wait=true)`
-  - If `status == "approved"`: Call `mcp__gsdreview__close_review(review_id=ID)`. Proceed to step 14.
-  - If `status == "changes_requested"`:
-    1. Read `verdict_reason`
-    2. Fetch proposal details: `PROPOSAL = mcp__gsdreview__get_proposal(review_id=ID)`
-    3. If `PROPOSAL.counter_patch_status == "pending"` and `PROPOSAL.counter_patch` exists:
-       - Apply/merge the counter-patch edits into PLAN artifacts first
-       - Call `mcp__gsdreview__accept_counter_patch(review_id=ID)` once incorporated
-    4. Spawn planner revision using `verdict_reason` + counter-patch content as required fixes
-    5. If plan checker is enabled (and `--skip-verify` was not set), re-run checker (steps 10-11)
-    6. Rebuild `PLANS_CONTENT`, resubmit via `mcp__gsdreview__create_review(review_id=ID, intent=..., project=PROJECT_SCOPE, description=UPDATED_PLANS_CONTENT, ...)`
-    7. Return to polling loop
-
-**Step 4: Error handling**
-If any `mcp__gsdreview__*` call fails with a connection error on first attempt:
-- Log warning: "Review broker unreachable. Proceeding in solo mode."
-- Set `TANDEM_ENABLED=false` for remainder of execution
-- Proceed to step 14
+**Error handling (fail-closed default):**
+- If the first broker call fails: stop and ask user to restore broker connectivity.
+- If user explicitly approves bypass, use audited override:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review override --gate plan --phase "${PHASE_NUMBER}" --reason "manual bypass approved by user"
+  ```
+- Always enforce gate before leaving this workflow:
+  ```bash
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate plan --phase "${PHASE_NUMBER}" --hash "${PLAN_DIFF_HASH}"
+  ```
 
 ## 14. Present Final Status
 
@@ -403,6 +442,15 @@ Route to `<offer_next>` OR `auto_advance` depending on flags/config.
 ## 15. Auto-Advance Check
 
 Check for auto-advance trigger:
+
+Before auto-advance, enforce review invariant:
+```bash
+if [ -n "${PLAN_DIFF_HASH:-}" ]; then
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate plan --phase "${PHASE_NUMBER}" --hash "${PLAN_DIFF_HASH}"
+else
+  node ~/.claude/get-shit-done/bin/gsd-tools.cjs review assert --gate plan --phase "${PHASE_NUMBER}"
+fi
+```
 
 1. Parse `--auto` flag from $ARGUMENTS
 2. Read `workflow.auto_advance` from config:
@@ -502,7 +550,7 @@ Verification: {Passed | Passed with override | Skipped}
 - [ ] Plans created (PLANNING COMPLETE or CHECKPOINT handled)
 - [ ] gsd-plan-checker spawned with CONTEXT.md
 - [ ] Verification passed OR user override OR max iterations with user decision
-- [ ] Tandem plan review gate passed when tandem is enabled (or cleanly skipped/fell back)
+- [ ] If review gating is enabled, parent orchestrator submitted/processed plan_review via gsdreview broker and recorded the gate
 - [ ] User sees status between agent spawns
 - [ ] User knows next steps
 </success_criteria>

@@ -43,7 +43,7 @@ async def _full_lifecycle(
     verdict: str = "approved",
     **overrides,
 ) -> str:
-    """Run create -> claim -> verdict -> close. Returns review_id."""
+    """Run create -> claim -> verdict and close only when approved. Returns review_id."""
     created = await _create_review(ctx, **overrides)
     rid = created["review_id"]
     await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
@@ -51,7 +51,8 @@ async def _full_lifecycle(
     if verdict == "changes_requested":
         verdict_kwargs["reason"] = "Needs work"
     await submit_verdict.fn(**verdict_kwargs)
-    await close_review.fn(review_id=rid, ctx=ctx)
+    if verdict == "approved":
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
     return rid
 
 

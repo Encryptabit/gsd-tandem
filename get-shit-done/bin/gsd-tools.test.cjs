@@ -1678,6 +1678,34 @@ describe('phase complete command', () => {
     cleanup(tmpDir);
   });
 
+  function approveExecuteGate(phase = '1') {
+    const hash = 'e'.repeat(64);
+    const rec = runGsdTools(
+      `review record --gate execute --phase ${phase} --review-id test-${phase} --hash ${hash}`,
+      tmpDir
+    );
+    assert.ok(rec.success, `failed to seed execute gate review: ${rec.error}`);
+  }
+
+  test('fails closed when execute review gate is missing', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap\n\n- [ ] Phase 1: Foundation\n\n### Phase 1: Foundation\n**Goal:** Setup\n**Plans:** 1 plans\n`
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `# State\n\n**Current Phase:** 01\n**Current Phase Name:** Foundation\n**Status:** In progress\n`
+    );
+    const p1 = path.join(tmpDir, '.planning', 'phases', '01-foundation');
+    fs.mkdirSync(p1, { recursive: true });
+    fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
+    fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
+
+    const result = runGsdTools('phase complete 1', tmpDir);
+    assert.strictEqual(result.success, false, 'phase complete must fail without execute review gate');
+    assert.ok(result.error.includes('Missing approved execute review gate'));
+  });
+
   test('marks phase complete and transitions to next', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
@@ -1705,6 +1733,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
     fs.mkdirSync(path.join(tmpDir, '.planning', 'phases', '02-api'), { recursive: true });
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
@@ -1726,6 +1755,47 @@ describe('phase complete command', () => {
     assert.ok(roadmap.includes('completed'), 'completion date should be added');
   });
 
+  test('transitions to next roadmap phase even when next phase directory is missing', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap
+
+- [ ] Phase 1: Foundation
+- [ ] Phase 2: API
+
+### Phase 1: Foundation
+**Goal:** Setup
+**Plans:** 1 plans
+
+### Phase 2: API
+**Goal:** Build API
+`
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `# State\n\n**Current Phase:** 01\n**Current Phase Name:** Foundation\n**Status:** In progress\n**Current Plan:** 01-01\n**Last Activity:** 2025-01-01\n**Last Activity Description:** Working on phase 1\n`
+    );
+
+    const p1 = path.join(tmpDir, '.planning', 'phases', '01-foundation');
+    fs.mkdirSync(p1, { recursive: true });
+    fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
+    fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
+    // Intentionally do NOT create phase 2 directory.
+
+    approveExecuteGate('1');
+    const result = runGsdTools('phase complete 1', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.next_phase, '02');
+    assert.strictEqual(output.next_phase_name, 'API');
+    assert.strictEqual(output.is_last_phase, false);
+
+    const state = fs.readFileSync(path.join(tmpDir, '.planning', 'STATE.md'), 'utf-8');
+    assert.ok(state.includes('**Current Phase:** 02'), 'should advance based on roadmap');
+    assert.ok(state.includes('**Current Phase Name:** API'), 'should use roadmap phase name');
+  });
+
   test('detects last phase in milestone', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
@@ -1741,6 +1811,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
@@ -1806,6 +1877,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
     fs.mkdirSync(path.join(tmpDir, '.planning', 'phases', '02-api'), { recursive: true });
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
@@ -1879,6 +1951,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
     fs.mkdirSync(path.join(tmpDir, '.planning', 'phases', '02-api'), { recursive: true });
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
@@ -1935,6 +2008,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
@@ -1966,6 +2040,7 @@ describe('phase complete command', () => {
     fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
 
+    approveExecuteGate('1');
     const result = runGsdTools('phase complete 1', tmpDir);
     assert.ok(result.success, `Command should succeed even without REQUIREMENTS.md: ${result.error}`);
   });
@@ -2342,5 +2417,163 @@ describe('scaffold command', () => {
     const output = JSON.parse(result.output);
     assert.strictEqual(output.created, false, 'should not overwrite');
     assert.strictEqual(output.reason, 'already_exists');
+  });
+});
+
+describe('review ledger commands', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('assert fails when required gate has no approved record', () => {
+    const result = runGsdTools('review assert --gate execute --phase 3', tmpDir);
+    assert.strictEqual(result.success, false, 'assert should fail without a recorded approval');
+    assert.ok(
+      result.error.includes('Missing approved execute review gate'),
+      `unexpected error: ${result.error}`
+    );
+  });
+
+  test('record then assert succeeds', () => {
+    const hash = 'a'.repeat(64);
+    const record = runGsdTools(
+      `review record --gate execute --phase 03 --review-id rev-123 --hash ${hash}`,
+      tmpDir
+    );
+    assert.ok(record.success, `record failed: ${record.error}`);
+
+    const assertResult = runGsdTools(
+      `review assert --gate execute --phase 3 --hash ${hash}`,
+      tmpDir
+    );
+    assert.ok(assertResult.success, `assert failed: ${assertResult.error}`);
+    const parsed = JSON.parse(assertResult.output);
+    assert.strictEqual(parsed.ok, true);
+    assert.strictEqual(parsed.review_id, 'rev-123');
+  });
+
+  test('hash mismatch fails in closed mode', () => {
+    const record = runGsdTools(
+      `review record --gate plan --phase 2 --review-id rev-plan --hash ${'b'.repeat(64)}`,
+      tmpDir
+    );
+    assert.ok(record.success, `record failed: ${record.error}`);
+
+    const assertResult = runGsdTools(
+      `review assert --gate plan --phase 2 --hash ${'c'.repeat(64)}`,
+      tmpDir
+    );
+    assert.strictEqual(assertResult.success, false, 'assert should fail on hash mismatch');
+    assert.ok(
+      assertResult.error.includes('review hash mismatch'),
+      `unexpected error: ${assertResult.error}`
+    );
+  });
+
+  test('invalidate removes approved gate and re-enables enforcement failure', () => {
+    const hash = 'd'.repeat(64);
+    const record = runGsdTools(
+      `review record --gate verify --phase 1 --review-id rev-verify --hash ${hash}`,
+      tmpDir
+    );
+    assert.ok(record.success, `record failed: ${record.error}`);
+
+    const invalidate = runGsdTools(
+      'review invalidate --gate verify --phase 1 --reason changed-artifact',
+      tmpDir
+    );
+    assert.ok(invalidate.success, `invalidate failed: ${invalidate.error}`);
+
+    const assertResult = runGsdTools('review assert --gate verify --phase 1', tmpDir);
+    assert.strictEqual(assertResult.success, false, 'assert should fail after invalidation');
+    assert.ok(assertResult.error.includes('Missing approved verify review gate'));
+  });
+
+  test('override requires allow_override=true', () => {
+    const blocked = runGsdTools(
+      'review override --gate execute --phase 5 --reason emergency',
+      tmpDir
+    );
+    assert.strictEqual(blocked.success, false, 'override should fail by default');
+    assert.ok(blocked.error.includes('review override is disabled'));
+
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        review: {
+          enabled: true,
+          fail_mode: 'closed',
+          allow_override: true,
+          required_gates: { discuss: true, plan: true, execute: true, verify: true },
+        },
+      }, null, 2),
+      'utf-8'
+    );
+
+    const allowed = runGsdTools(
+      'review override --gate execute --phase 5 --reason emergency',
+      tmpDir
+    );
+    assert.ok(allowed.success, `override failed: ${allowed.error}`);
+
+    const assertResult = runGsdTools('review assert --gate execute --phase 5', tmpDir);
+    assert.ok(assertResult.success, `assert failed: ${assertResult.error}`);
+    const parsed = JSON.parse(assertResult.output);
+    assert.strictEqual(parsed.overridden, true);
+  });
+
+  test('config-ensure-section backfills review defaults into existing config', () => {
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        mode: 'interactive',
+        tandem_enabled: false,
+        workflow: { research: true, plan_check: true, verifier: true },
+      }, null, 2),
+      'utf-8'
+    );
+
+    const ensure = runGsdTools('config-ensure-section', tmpDir);
+    assert.ok(ensure.success, `ensure failed: ${ensure.error}`);
+    const parsedEnsure = JSON.parse(ensure.output);
+    assert.strictEqual(parsedEnsure.updated, true, 'existing config should be backfilled');
+
+    const updated = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    assert.strictEqual(updated.review.enabled, true);
+    assert.strictEqual(updated.review.fail_mode, 'closed');
+    assert.strictEqual(updated.review.required_gates.execute, true);
+    assert.strictEqual('tandem_enabled' in updated, false);
+    assert.strictEqual(updated.review_granularity, 'per_task');
+    assert.strictEqual(updated.execution_mode, 'blocking');
+    assert.strictEqual(updated.reviewer_pool.workspace_path, 'auto');
+    assert.strictEqual(updated.reviewer_pool.model, 'gpt-5.3-codex');
+  });
+
+  test('config-get rejects tandem_enabled legacy key', () => {
+    const result = runGsdTools('config-get tandem_enabled', tmpDir);
+    assert.strictEqual(result.success, false, 'config-get tandem_enabled should fail');
+    assert.ok(result.error.includes('tandem_enabled is no longer supported'));
+  });
+
+  test('config-set review.enabled does not create tandem_enabled key', () => {
+    const setReview = runGsdTools('config-set review.enabled false', tmpDir);
+    assert.ok(setReview.success, `config-set review.enabled failed: ${setReview.error}`);
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.planning', 'config.json'), 'utf-8'));
+    assert.strictEqual(config.review.enabled, false);
+    assert.strictEqual('tandem_enabled' in config, false);
+  });
+
+  test('config-set rejects tandem_enabled legacy key', () => {
+    const result = runGsdTools('config-set tandem_enabled true', tmpDir);
+    assert.strictEqual(result.success, false, 'config-set tandem_enabled should fail');
+    assert.ok(result.error.includes('tandem_enabled is no longer supported'));
   });
 });

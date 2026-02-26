@@ -28,11 +28,30 @@ class _FakeStdin:
         self.closed = True
 
 
+class _FakeStream:
+    def __init__(self, lines: list[str] | None = None) -> None:
+        payloads = lines or []
+        self._lines = [f"{line}\n".encode() for line in payloads]
+
+    async def readline(self) -> bytes:
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+
 class _FakeProcess:
-    def __init__(self, pid: int = 4321) -> None:
+    def __init__(
+        self,
+        pid: int = 4321,
+        *,
+        stdout_lines: list[str] | None = None,
+        stderr_lines: list[str] | None = None,
+    ) -> None:
         self.pid = pid
         self.returncode: int | None = None
         self.stdin = _FakeStdin()
+        self.stdout = _FakeStream(stdout_lines)
+        self.stderr = _FakeStream(stderr_lines)
         self.terminated = False
         self.killed = False
 
@@ -63,6 +82,78 @@ def pool(tmp_path: Path) -> ReviewerPool:
     prompt = tmp_path / "reviewer_prompt.md"
     prompt.write_text("Reviewer {reviewer_id}\n{claim_generation_note}\n", encoding="utf-8")
     return ReviewerPool(session_token="abcd1234", config=_spawn_config(tmp_path))
+
+
+def test_resolve_prompt_prefers_workspace_over_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    workspace_prompt = workspace / "reviewer_prompt.md"
+    workspace_prompt.write_text("workspace", encoding="utf-8")
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "reviewer_prompt.md").write_text("cwd", encoding="utf-8")
+    monkeypatch.chdir(cwd)
+
+    cfg = SpawnConfig(
+        workspace_path=str(workspace),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    assert pool._resolve_prompt_template_path() == workspace_prompt
+
+
+def test_resolve_prompt_uses_user_config_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    xdg_home = tmp_path / "xdg"
+    global_prompt = xdg_home / "gsd-review-broker" / "reviewer_prompt.md"
+    global_prompt.parent.mkdir(parents=True)
+    global_prompt.write_text("global", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+
+    cfg = SpawnConfig(
+        workspace_path=str(workspace),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    assert pool._resolve_prompt_template_path() == global_prompt
+
+
+def test_resolve_prompt_honors_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "reviewer_prompt.md").write_text("workspace", encoding="utf-8")
+
+    forced_prompt = tmp_path / "forced-reviewer-prompt.md"
+    forced_prompt.write_text("forced", encoding="utf-8")
+    monkeypatch.setenv("BROKER_PROMPT_TEMPLATE_PATH", str(forced_prompt))
+
+    cfg = SpawnConfig(
+        workspace_path=str(workspace),
+        prompt_template_path="reviewer_prompt.md",
+        spawn_cooldown_seconds=1.0,
+        max_pool_size=3,
+        model="o4-mini",
+    )
+    pool = ReviewerPool(session_token="abcd1234", config=cfg)
+
+    assert pool._resolve_prompt_template_path() == forced_prompt
 
 
 async def test_spawn_reviewer_creates_process(
@@ -246,7 +337,7 @@ async def test_spawn_no_shell_true(
     assert "shell" not in kwargs
 
 
-async def test_spawn_uses_devnull_for_stdout_stderr(
+async def test_spawn_uses_pipes_for_stdout_stderr(
     pool: ReviewerPool, db: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     mock_spawn = AsyncMock(return_value=_FakeProcess())
@@ -258,8 +349,77 @@ async def test_spawn_uses_devnull_for_stdout_stderr(
     )
     await pool.spawn_reviewer(db, asyncio.Lock())
     _, kwargs = mock_spawn.call_args
-    assert kwargs["stdout"] is asyncio.subprocess.DEVNULL
-    assert kwargs["stderr"] is asyncio.subprocess.DEVNULL
+    assert kwargs["stdout"] is asyncio.subprocess.PIPE
+    assert kwargs["stderr"] is asyncio.subprocess.PIPE
+
+
+async def test_spawn_writes_structured_reviewer_logs(
+    pool: ReviewerPool,
+    db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    xdg_home = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+    fake_proc = _FakeProcess(stdout_lines=["hello from reviewer"], stderr_lines=["warn"])
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=fake_proc),
+    )
+    monkeypatch.setattr("gsd_review_broker.pool.build_codex_argv", lambda _cfg: ["codex", "-"])
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.load_prompt_template",
+        lambda _path, reviewer_id: reviewer_id,
+    )
+    spawned = await pool.spawn_reviewer(db, asyncio.Lock())
+    await asyncio.sleep(0)
+    await pool._terminate_reviewer(spawned["reviewer_id"], db, asyncio.Lock())
+
+    log_path = (
+        xdg_home
+        / "gsd-review-broker"
+        / "reviewer-logs"
+        / f"reviewer-{spawned['reviewer_id']}.jsonl"
+    )
+    assert log_path.exists()
+    payload = log_path.read_text(encoding="utf-8")
+    assert '"event":"reviewer_output"' in payload
+    assert '"stream":"stdout"' in payload
+    assert '"stream":"stderr"' in payload
+
+
+async def test_spawn_rotates_reviewer_logs(
+    pool: ReviewerPool,
+    db: aiosqlite.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    xdg_home = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_MAX_BYTES", "1024")
+    monkeypatch.setenv("BROKER_REVIEWER_LOG_BACKUPS", "2")
+    fake_proc = _FakeProcess(stdout_lines=["x" * 900, "y" * 900, "z" * 900])
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=fake_proc),
+    )
+    monkeypatch.setattr("gsd_review_broker.pool.build_codex_argv", lambda _cfg: ["codex", "-"])
+    monkeypatch.setattr(
+        "gsd_review_broker.pool.load_prompt_template",
+        lambda _path, reviewer_id: reviewer_id,
+    )
+    spawned = await pool.spawn_reviewer(db, asyncio.Lock())
+    await asyncio.sleep(0)
+    await pool._terminate_reviewer(spawned["reviewer_id"], db, asyncio.Lock())
+
+    base = (
+        xdg_home
+        / "gsd-review-broker"
+        / "reviewer-logs"
+        / f"reviewer-{spawned['reviewer_id']}.jsonl"
+    )
+    assert base.exists()
+    assert Path(f"{base}.1").exists()
 
 
 async def test_spawn_db_failure_terminates_orphan(

@@ -57,7 +57,7 @@ $promptText = @(
     "5) If you find a problem and can fix it quickly, prefer submit_verdict(review_id=ID, verdict=`"changes_requested`", reason=..., counter_patch=UNIFIED_DIFF). Include a concrete patch whenever feasible so proposer can copy/apply it directly."
     "6) Use verdict=`"comment`" only for non-blocking suggestions or uncertain ideas. If useful, attach counter_patch there too."
     "7) Use verdict=`"approved`" when no blocking issues remain."
-    "8) Only close_review(review_id=ID) after approved. Do NOT close after changes_requested/comment; leave it open for proposer to accept/reject counter-patch or resubmit."
+    "8) Never call close_review. Leave approved and changes_requested reviews open for proposer discussion/resubmission; proposer closes only after approval."
     "9) Loop Infinitely."
     "Counter-patch rules: keep patches minimal and valid unified diffs that apply cleanly; if patch validation fails, still submit changes_requested with exact file-level guidance in reason."
     "Always include reasoning in verdict reason and prioritize catching real risks over speed."

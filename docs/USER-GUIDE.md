@@ -180,6 +180,7 @@ A detailed reference for workflows, troubleshooting, and configuration. For quic
 | `/gsd:map-codebase` | Analyze existing codebase | Before `/gsd:new-project` on existing code |
 | `/gsd:quick` | Ad-hoc task with GSD guarantees | Bug fixes, small features, config changes |
 | `/gsd:debug [desc]` | Systematic debugging with persistent state | When something breaks |
+| `/gsd:tandem-review [desc]` | Submit current diff to gsdreview and auto-run proposer lifecycle | When you want direct broker review on current local changes |
 | `/gsd:add-todo [desc]` | Capture an idea for later | Think of something during a session |
 | `/gsd:check-todos` | List pending todos | Review captured ideas |
 | `/gsd:settings` | Configure workflow toggles and model profile | Change model, toggle agents |
@@ -207,6 +208,24 @@ GSD stores project settings in `.planning/config.json`. Configure during `/gsd:n
     "research": true,
     "plan_check": true,
     "verifier": true
+  },
+  "review": {
+    "enabled": true,
+    "fail_mode": "closed",
+    "allow_override": false,
+    "required_gates": {
+      "discuss": true,
+      "plan": true,
+      "execute": true,
+      "verify": true
+    }
+  },
+  "review_granularity": "per_task",
+  "execution_mode": "blocking",
+  "reviewer_pool": {
+    "workspace_path": "auto",
+    "model": "gpt-5.3-codex",
+    "reasoning_effort": "high"
   },
   "git": {
     "branching_strategy": "none",
@@ -242,6 +261,17 @@ GSD stores project settings in `.planning/config.json`. Configure during `/gsd:n
 | `workflow.verifier` | `true`, `false` | `true` | Post-execution verification against phase goals |
 
 Disable these to speed up phases in familiar domains or when conserving tokens.
+
+### Tandem & Review
+
+| Setting | Options | Default | What it Controls |
+|---------|---------|---------|------------------|
+| `review.enabled` | `true`, `false` | `true` | Enforce review gates before progression |
+| `review.fail_mode` | `closed`, `open` | `closed` | Block on missing approvals (`closed`) or warn-only (`open`) |
+| `review.required_gates.*` | `true`, `false` | `true` | Per-stage gate enforcement for discuss/plan/execute/verify |
+| `review_granularity` | `per_task`, `per_plan` | `per_task` | Review scope used by executor tandem flow |
+| `execution_mode` | `blocking`, `optimistic` | `blocking` | Whether execution waits for review approvals |
+| `reviewer_pool` | object/null | object | Broker reviewer auto-spawn/scaling configuration |
 
 ### Git Branching
 

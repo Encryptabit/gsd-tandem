@@ -541,7 +541,7 @@ class TestNotificationPolling:
         poll_task = asyncio.create_task(poll_with_wait())
         await asyncio.sleep(0.05)
 
-        await close_review.fn(review_id=review_id, ctx=ctx)
+        await close_review.fn(review_id=review_id, closer_role="proposer", ctx=ctx)
 
         status_result = await asyncio.wait_for(poll_task, timeout=5.0)
         assert "error" not in status_result

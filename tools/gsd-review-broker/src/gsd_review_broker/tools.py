@@ -18,10 +18,33 @@ from gsd_review_broker.diff_utils import extract_affected_files, validate_diff
 from gsd_review_broker.models import ReviewStatus
 from gsd_review_broker.notifications import QUEUE_TOPIC
 from gsd_review_broker.priority import infer_priority
-from gsd_review_broker.server import mcp
+from gsd_review_broker.server import caller_tag, mcp
 from gsd_review_broker.state_machine import validate_transition
 
 logger = logging.getLogger("gsd_review_broker")
+
+
+def mcp_tool(*args, **kwargs):
+    """FastMCP tool decorator with legacy `.fn` compatibility for tests/internal calls."""
+    raw_tool = mcp.tool
+
+    # Bare decorator usage: @mcp_tool
+    if args and callable(args[0]) and len(args) == 1 and not kwargs:
+        fn = args[0]
+        registered = raw_tool(fn)
+        if not hasattr(registered, "fn"):
+            registered.fn = registered
+        return registered
+
+    decorator = raw_tool(*args, **kwargs)
+
+    def _decorate(fn):
+        registered = decorator(fn)
+        if not hasattr(registered, "fn"):
+            registered.fn = registered
+        return registered
+
+    return _decorate
 
 
 def _app_ctx(ctx: Context) -> AppContext:
@@ -75,7 +98,28 @@ def _missing(value: str | None) -> bool:
     return value is None or value.strip() == ""
 
 
-@mcp.tool
+def _reviewer_tag(reviewer_id: str) -> str:
+    """Extract short display name from reviewer_id by stripping session token suffix."""
+    if not reviewer_id:
+        return "reviewer"
+    # reviewer_id format: "codex-r1-b6c93011" -> "codex-r1"
+    # Only strip if last segment looks like a hex session token (>=8 hex chars)
+    idx = reviewer_id.rfind("-")
+    if idx > 0:
+        suffix = reviewer_id[idx + 1:]
+        if len(suffix) >= 8 and all(c in "0123456789abcdef" for c in suffix.lower()):
+            return reviewer_id[:idx]
+    return reviewer_id
+
+
+def _resolve_caller(caller_id: str | None) -> str:
+    """Derive caller tag from an optional caller_id parameter."""
+    if not caller_id or caller_id.strip() == "":
+        return "broker"
+    return _reviewer_tag(caller_id)
+
+
+@mcp_tool
 async def create_review(
     intent: str,
     agent_type: str,
@@ -111,6 +155,7 @@ async def create_review(
     `project` is optional and can be used to scope queue operations in shared
     global broker deployments.
     """
+    caller_tag.set("proposer")
     app: AppContext = _app_ctx(ctx)
 
     # Compute affected_files from diff if provided
@@ -144,15 +189,27 @@ async def create_review(
                     return {"error": f"Review not found: {review_id}"}
                 current_status = ReviewStatus(row["status"])
                 resolved_project = project if project is not None else row["project"]
-                try:
-                    validate_transition(current_status, ReviewStatus.PENDING)
-                except ValueError as exc:
-                    await app.db.execute("ROLLBACK")
-                    return {"error": str(exc)}
+                allow_pending_revision = False
+                if current_status == ReviewStatus.PENDING:
+                    history_cursor = await app.db.execute(
+                        """SELECT 1
+                           FROM audit_events
+                           WHERE review_id = ? AND new_status = ?
+                           LIMIT 1""",
+                        (review_id, str(ReviewStatus.CHANGES_REQUESTED)),
+                    )
+                    allow_pending_revision = await history_cursor.fetchone() is not None
+                if not allow_pending_revision:
+                    try:
+                        validate_transition(current_status, ReviewStatus.PENDING)
+                    except ValueError as exc:
+                        await app.db.execute("ROLLBACK")
+                        return {"error": str(exc)}
                 await app.db.execute(
                     """UPDATE reviews
                        SET status = ?, intent = ?, description = ?, diff = ?,
-                           affected_files = ?, claimed_by = NULL, verdict_reason = NULL,
+                           affected_files = ?, claimed_by = NULL, claimed_at = NULL,
+                           verdict_reason = NULL,
                            current_round = current_round + 1,
                            counter_patch = NULL,
                            counter_patch_affected_files = NULL,
@@ -175,7 +232,7 @@ async def create_review(
                 await record_event(
                     app.db, review_id, "review_revised",
                     actor=agent_type,
-                    old_status="changes_requested",
+                    old_status=str(current_status),
                     new_status="pending",
                     metadata={"revised": True, "project": resolved_project},
                 )
@@ -257,13 +314,14 @@ async def create_review(
     return {"review_id": new_review_id, "status": ReviewStatus.PENDING, "project": project}
 
 
-@mcp.tool
+@mcp_tool
 async def list_reviews(
     status: str | None = None,
     category: str | None = None,
     project: str | None = None,
     projects: list[str] | None = None,
     wait: bool = False,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """List reviews, optionally filtered by status and/or category.
@@ -280,6 +338,7 @@ async def list_reviews(
     If wait=True, blocks up to 25 seconds until a pending review exists.
     wait=True requires status='pending' to avoid ambiguous semantics.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     if wait and status != "pending":
         logger.info(
             "list_reviews -> invalid wait config (status=%s, category=%s)",
@@ -386,7 +445,7 @@ async def list_reviews(
         )
 
 
-@mcp.tool
+@mcp_tool
 async def claim_review(
     review_id: str,
     reviewer_id: str,
@@ -401,6 +460,7 @@ async def claim_review(
     On successful claim, returns review metadata (intent, description, affected_files,
     has_diff flag) but NOT the full diff text. Use get_proposal to retrieve the diff.
     """
+    caller_tag.set(_reviewer_tag(reviewer_id))
     app: AppContext = _app_ctx(ctx)
     auto_rejected_result: dict | None = None
     diff_text: str | None = None
@@ -411,6 +471,7 @@ async def claim_review(
             await app.db.execute("BEGIN IMMEDIATE")
             cursor = await app.db.execute(
                 "SELECT status, diff, intent, description, affected_files, project, category, "
+                "claimed_by, "
                 "skip_diff_validation, claim_generation "
                 "FROM reviews WHERE id = ?",
                 (review_id,),
@@ -425,6 +486,33 @@ async def claim_review(
             except ValueError as exc:
                 await app.db.execute("ROLLBACK")
                 return {"error": str(exc)}
+            reserved_reviewer = row["claimed_by"] if current_status == ReviewStatus.PENDING else None
+            if (
+                current_status == ReviewStatus.PENDING
+                and not _missing(reserved_reviewer)
+                and reviewer_id != reserved_reviewer
+            ):
+                keep_reservation = False
+                reviewer_cursor = await app.db.execute(
+                    "SELECT status FROM reviewers WHERE id = ?",
+                    (reserved_reviewer,),
+                )
+                reviewer_row = await reviewer_cursor.fetchone()
+                if reviewer_row is not None and reviewer_row["status"] == "active":
+                    keep_reservation = True
+                    pool = getattr(app, "pool", None)
+                    if pool is not None:
+                        proc = pool._processes.get(reserved_reviewer)
+                        keep_reservation = proc is not None and proc.returncode is None
+                if keep_reservation:
+                    await app.db.execute("ROLLBACK")
+                    return {"error": f"Review reserved for reviewer {reserved_reviewer}"}
+                await app.db.execute(
+                    """UPDATE reviews
+                       SET claimed_by = NULL, claimed_at = NULL, updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (review_id,),
+                )
 
             # Backward-compat: reviewer rows are optional (manual reviewers).
             if not _missing(reviewer_id):
@@ -532,7 +620,7 @@ async def claim_review(
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def submit_verdict(
     review_id: str,
     verdict: str,
@@ -553,6 +641,7 @@ async def submit_verdict(
     If counter_patch is provided, it is validated via git apply --check before storage.
     The counter-patch is stored with status 'pending' for the proposer to accept or reject.
     """
+    caller_tag.set(_reviewer_tag(reviewer_id) if reviewer_id else "reviewer")
     normalized_reason = _normalize_reason(reason)
 
     # --- Notes enforcement ---
@@ -817,7 +906,7 @@ async def _maybe_finalize_draining_reviewer(
     reviewer_id: str | None,
     trigger: str,
 ) -> None:
-    """Terminate draining reviewer when all claimed reviews are resolved."""
+    """Terminate draining reviewer when all attached reviews are closed."""
     if _missing(reviewer_id):
         return
     pool = getattr(app, "pool", None)
@@ -835,7 +924,9 @@ async def _maybe_finalize_draining_reviewer(
                 return
 
             cursor = await app.db.execute(
-                "SELECT COUNT(*) AS n FROM reviews WHERE status = 'claimed' AND claimed_by = ?",
+                """SELECT COUNT(*) AS n
+                   FROM reviews
+                   WHERE status != 'closed' AND claimed_by = ?""",
                 (reviewer_id,),
             )
             claims_row = await cursor.fetchone()
@@ -950,6 +1041,7 @@ async def reclaim_review(
 
 async def _reactive_scale_check(app: AppContext, source: str = "unspecified") -> None:
     """Spawn reviewers reactively based on pending backlog ratio."""
+    caller_tag.set("broker")
     pool = getattr(app, "pool", None)
     if pool is None:
         logger.info("reactive_scale_check[%s] -> skipped (pool disabled)", source)
@@ -1015,7 +1107,7 @@ async def _reactive_scale_check(app: AppContext, source: str = "unspecified") ->
         logger.exception("reactive scaling check failed")
 
 
-@mcp.tool
+@mcp_tool
 async def spawn_reviewer(ctx: Context = None) -> dict:
     """Manually spawn a reviewer process when pool mode is configured."""
     app: AppContext = _app_ctx(ctx)
@@ -1028,7 +1120,7 @@ async def spawn_reviewer(ctx: Context = None) -> dict:
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def kill_reviewer(reviewer_id: str, ctx: Context = None) -> dict:
     """Drain and terminate a broker-managed reviewer by ID."""
     app: AppContext = _app_ctx(ctx)
@@ -1042,7 +1134,7 @@ async def kill_reviewer(reviewer_id: str, ctx: Context = None) -> dict:
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def list_reviewers(ctx: Context = None) -> dict:
     """List active session reviewers in the pool."""
     app: AppContext = _app_ctx(ctx)
@@ -1081,22 +1173,41 @@ async def list_reviewers(ctx: Context = None) -> dict:
     }
 
 
-@mcp.tool
+@mcp_tool
 async def close_review(
     review_id: str,
+    closer_role: str,
     ctx: Context = None,
 ) -> dict:
-    """Close a review that has reached a terminal verdict (approved or changes_requested)."""
+    """Close an approved review.
+
+    Only the proposer may close a review. Reviews remain open through transient
+    discussion/verdict states until proposer closure.
+    """
+    caller_tag.set(closer_role)
+    if closer_role != "proposer":
+        return {
+            "error": (
+                f"Invalid closer_role: {closer_role!r}. "
+                "Only proposer may close reviews."
+            )
+        }
+
     app: AppContext = _app_ctx(ctx)
+    claimed_by: str | None = None
     async with app.write_lock:
         try:
             await app.db.execute("BEGIN IMMEDIATE")
-            cursor = await app.db.execute("SELECT status FROM reviews WHERE id = ?", (review_id,))
+            cursor = await app.db.execute(
+                "SELECT status, claimed_by FROM reviews WHERE id = ?",
+                (review_id,),
+            )
             row = await cursor.fetchone()
             if row is None:
                 await app.db.execute("ROLLBACK")
                 return {"error": f"Review not found: {review_id}"}
             current_status = ReviewStatus(row["status"])
+            claimed_by = row["claimed_by"]
             try:
                 validate_transition(current_status, ReviewStatus.CLOSED)
             except ValueError as exc:
@@ -1109,7 +1220,7 @@ async def close_review(
             )
             await record_event(
                 app.db, review_id, "review_closed",
-                actor="system",
+                actor=closer_role,
                 old_status=str(current_status),
                 new_status="closed",
             )
@@ -1117,13 +1228,14 @@ async def close_review(
         except Exception as exc:
             await _rollback_quietly(app)
             return _db_error("close_review", exc)
+    await _maybe_finalize_draining_reviewer(app, claimed_by, trigger="review_closed")
     app.notifications.notify(review_id)
     app.notifications.cleanup(review_id)
-    logger.info("close_review -> %s CLOSED", _short(review_id))
-    return {"review_id": review_id, "status": ReviewStatus.CLOSED}
+    logger.info("close_review -> %s CLOSED by %s", _short(review_id), closer_role)
+    return {"review_id": review_id, "status": ReviewStatus.CLOSED, "closed_by": closer_role}
 
 
-@mcp.tool
+@mcp_tool
 async def accept_counter_patch(
     review_id: str,
     ctx: Context = None,
@@ -1134,6 +1246,7 @@ async def accept_counter_patch(
     If the counter-patch no longer applies cleanly, returns an error without
     modifying review state (the proposer can then reject it instead).
     """
+    caller_tag.set("proposer")
     app: AppContext = _app_ctx(ctx)
     async with app.write_lock:
         try:
@@ -1189,12 +1302,13 @@ async def accept_counter_patch(
     }
 
 
-@mcp.tool
+@mcp_tool
 async def reject_counter_patch(
     review_id: str,
     ctx: Context = None,
 ) -> dict:
     """Reject a pending counter-patch, clearing counter-patch columns."""
+    caller_tag.set("proposer")
     app: AppContext = _app_ctx(ctx)
     async with app.write_lock:
         try:
@@ -1230,10 +1344,11 @@ async def reject_counter_patch(
     return {"review_id": review_id, "counter_patch_status": "rejected"}
 
 
-@mcp.tool
+@mcp_tool
 async def get_review_status(
     review_id: str,
     wait: bool = False,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Check the current status of a review. Call repeatedly to poll for changes.
@@ -1246,6 +1361,7 @@ async def get_review_status(
     - wait=False (default): Traditional polling, recommended interval 3 seconds.
     - wait=True: Long-poll mode, call again immediately after each response.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
 
     if wait:
@@ -1288,9 +1404,10 @@ async def get_review_status(
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def get_proposal(
     review_id: str,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Retrieve full proposal content including diff.
@@ -1298,6 +1415,7 @@ async def get_proposal(
     Use after claim_review to read the complete unified diff for review.
     This is a read-only operation -- no state changes occur.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
     cursor = await app.db.execute(
         """SELECT id, status, intent, description, diff, affected_files, project, category,
@@ -1345,7 +1463,7 @@ async def get_proposal(
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def add_message(
     review_id: str,
     sender_role: str,
@@ -1359,13 +1477,17 @@ async def add_message(
     alternation. Either role can send the first message, but subsequent messages
     must alternate between proposer and reviewer.
 
-    Only reviews in 'claimed' or 'changes_requested' state accept messages.
+    Only non-closed, post-claim review states accept messages:
+    claimed, in_review, changes_requested, approved.
     """
+    caller_tag.set(sender_role)
     if sender_role not in ("proposer", "reviewer"):
         return {"error": f"Invalid sender_role: {sender_role!r}. Must be 'proposer' or 'reviewer'."}
 
     app: AppContext = _app_ctx(ctx)
     msg_id = str(uuid.uuid4())
+    requeued_for_followup = False
+    detached_reviewer_id: str | None = None
 
     async with app.write_lock:
         try:
@@ -1373,7 +1495,7 @@ async def add_message(
 
             # Verify review exists and is in a valid state for messaging
             cursor = await app.db.execute(
-                "SELECT status, current_round FROM reviews WHERE id = ?",
+                "SELECT status, current_round, claimed_by FROM reviews WHERE id = ?",
                 (review_id,),
             )
             row = await cursor.fetchone()
@@ -1382,16 +1504,23 @@ async def add_message(
                 return {"error": f"Review not found: {review_id}"}
 
             current_status = ReviewStatus(row["status"])
-            if current_status not in (ReviewStatus.CLAIMED, ReviewStatus.CHANGES_REQUESTED):
+            if current_status not in (
+                ReviewStatus.CLAIMED,
+                ReviewStatus.IN_REVIEW,
+                ReviewStatus.CHANGES_REQUESTED,
+                ReviewStatus.APPROVED,
+            ):
                 await app.db.execute("ROLLBACK")
                 return {
                     "error": (
                         f"Cannot add message to review in '{current_status}' state. "
-                        "Messages are only valid on claimed or changes_requested reviews."
+                        "Messages are only valid on claimed, in_review, "
+                        "changes_requested, or approved reviews."
                     )
                 }
 
             current_round = row["current_round"]
+            original_claimed_by = row["claimed_by"]
 
             # Turn enforcement: check last message sender
             cursor = await app.db.execute(
@@ -1421,6 +1550,48 @@ async def add_message(
                 actor=sender_role,
                 metadata={"round": current_round, "body_preview": body[:100]},
             )
+            if (
+                sender_role == "proposer"
+                and current_status == ReviewStatus.CHANGES_REQUESTED
+            ):
+                requeued_for_followup = True
+                reserved_reviewer = original_claimed_by
+                keep_reservation = False
+                if not _missing(reserved_reviewer):
+                    reviewer_cursor = await app.db.execute(
+                        "SELECT status FROM reviewers WHERE id = ?",
+                        (reserved_reviewer,),
+                    )
+                    reviewer_row = await reviewer_cursor.fetchone()
+                    if reviewer_row is not None and reviewer_row["status"] == "active":
+                        keep_reservation = True
+                        pool = getattr(app, "pool", None)
+                        if pool is not None:
+                            proc = pool._processes.get(reserved_reviewer)
+                            keep_reservation = proc is not None and proc.returncode is None
+                if not keep_reservation:
+                    reserved_reviewer = None
+                if not _missing(original_claimed_by) and reserved_reviewer != original_claimed_by:
+                    detached_reviewer_id = original_claimed_by
+                await app.db.execute(
+                    """UPDATE reviews
+                       SET status = ?, claimed_by = ?, claimed_at = NULL,
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (ReviewStatus.PENDING, reserved_reviewer, review_id),
+                )
+                await record_event(
+                    app.db,
+                    review_id,
+                    "review_reclaimed",
+                    actor="proposer",
+                    old_status="changes_requested",
+                    new_status="pending",
+                    metadata={
+                        "reason": "proposer_message",
+                        "reserved_reviewer": reserved_reviewer,
+                    },
+                )
             await app.db.execute("COMMIT")
         except Exception as exc:
             await _rollback_quietly(app)
@@ -1428,20 +1599,32 @@ async def add_message(
 
     # Fire notification outside write_lock
     app.notifications.notify(review_id)
+    if requeued_for_followup:
+        app.notifications.notify(QUEUE_TOPIC)
+        if getattr(app, "pool", None) is not None:
+            asyncio.create_task(_reactive_scale_check(app, source="add_message"))
+        if detached_reviewer_id is not None:
+            await _maybe_finalize_draining_reviewer(
+                app,
+                detached_reviewer_id,
+                trigger="proposer_followup_requeue",
+            )
 
     logger.info(
-        "add_message -> %s by %s (round=%s)",
+        "add_message -> %s by %s (round=%s, requeued=%s)",
         _short(review_id),
         sender_role,
         current_round,
+        requeued_for_followup,
     )
     return {"message_id": msg_id, "review_id": review_id, "round": current_round}
 
 
-@mcp.tool
+@mcp_tool
 async def get_discussion(
     review_id: str,
     round: int | None = None,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Retrieve the discussion thread for a review.
@@ -1449,6 +1632,7 @@ async def get_discussion(
     Returns all messages in chronological order. Optionally filter by round number.
     This is a read-only operation -- no state changes occur.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
 
     # Verify review exists
@@ -1501,11 +1685,12 @@ async def get_discussion(
     return {"review_id": review_id, "messages": messages, "count": len(messages)}
 
 
-@mcp.tool
+@mcp_tool
 async def get_activity_feed(
     status: str | None = None,
     category: str | None = None,
     project: str | None = None,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Get a live activity feed of all reviews with message previews.
@@ -1516,6 +1701,7 @@ async def get_activity_feed(
 
     Optionally filter by status, category, and/or project.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
     conditions: list[str] = []
     params: list[str] = []
@@ -1583,9 +1769,10 @@ async def get_activity_feed(
     return {"reviews": reviews, "count": len(reviews)}
 
 
-@mcp.tool
+@mcp_tool
 async def get_audit_log(
     review_id: str | None = None,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Get the append-only audit event history.
@@ -1594,6 +1781,7 @@ async def get_audit_log(
     If omitted, returns ALL events across all reviews.
     Events are ordered by insertion order (ascending).
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
 
     if review_id is not None:
@@ -1652,14 +1840,15 @@ async def get_audit_log(
     return result
 
 
-@mcp.tool
-async def get_review_stats(project: str | None = None, ctx: Context = None) -> dict:
+@mcp_tool
+async def get_review_stats(project: str | None = None, caller_id: str | None = None, ctx: Context = None) -> dict:
     """Get workflow health statistics for the broker.
 
     Returns total reviews, approval/rejection rates, reviews by category,
     average time-to-verdict, average review duration, and average time
     in each state. Use `project` to scope stats in a shared broker database.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
     review_where_clause = "WHERE project = ?" if project is not None else ""
     review_where_params: tuple[str, ...] = (project,) if project is not None else ()
@@ -1835,9 +2024,10 @@ async def get_review_stats(project: str | None = None, ctx: Context = None) -> d
     return result
 
 
-@mcp.tool
+@mcp_tool
 async def get_review_timeline(
     review_id: str,
+    caller_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Get the complete chronological timeline for a single review.
@@ -1846,6 +2036,7 @@ async def get_review_timeline(
     verdicts, counter-patches, and closure. Each event includes
     its type, actor, status change, and timestamp.
     """
+    caller_tag.set(_resolve_caller(caller_id))
     app: AppContext = _app_ctx(ctx)
 
     # Verify review exists

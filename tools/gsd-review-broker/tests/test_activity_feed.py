@@ -251,7 +251,7 @@ class TestAuditLog:
         rid = created["review_id"]
         await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
         await submit_verdict.fn(review_id=rid, verdict="approved", ctx=ctx)
-        await close_review.fn(review_id=rid, ctx=ctx)
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
 
         log = await get_audit_log.fn(review_id=rid, ctx=ctx)
         events = log["events"]
@@ -298,7 +298,7 @@ class TestReviewTimeline:
         rid = created["review_id"]
         await claim_review.fn(review_id=rid, reviewer_id="rev-1", ctx=ctx)
         await submit_verdict.fn(review_id=rid, verdict="approved", reason="LGTM", ctx=ctx)
-        await close_review.fn(review_id=rid, ctx=ctx)
+        await close_review.fn(review_id=rid, closer_role="proposer", ctx=ctx)
 
         result = await get_review_timeline.fn(review_id=rid, ctx=ctx)
         assert result["review_id"] == rid

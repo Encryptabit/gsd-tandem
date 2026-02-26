@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 from gsd_review_broker.tools import (
+    add_message,
     claim_review,
     close_review,
     create_review,
@@ -309,6 +310,37 @@ class TestRevisionFlow:
         assert "error" in result
         assert "Invalid transition" in result["error"]
 
+    async def test_revision_from_pending_allowed_after_prior_changes_requested(
+        self, ctx: MockContext
+    ) -> None:
+        """Pending revisions are allowed after a prior changes_requested cycle."""
+        created = await _create_review(ctx, intent="original")
+        review_id = created["review_id"]
+        await claim_review.fn(review_id=review_id, reviewer_id="reviewer-1", ctx=ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Please revise",
+            ctx=ctx,
+        )
+        await add_message.fn(
+            review_id=review_id,
+            sender_role="proposer",
+            body="I will update this shortly",
+            ctx=ctx,
+        )
+
+        revised = await create_review.fn(
+            intent="revised from requeued pending",
+            agent_type="gsd-executor",
+            agent_role="proposer",
+            phase="1",
+            review_id=review_id,
+            ctx=ctx,
+        )
+        assert revised.get("revised") is True
+        assert revised["status"] == "pending"
+
     async def test_revision_not_found_fails(self, ctx: MockContext) -> None:
         """Revising a non-existent review returns error."""
         result = await create_review.fn(
@@ -485,7 +517,7 @@ class TestFullProposalLifecycle:
         assert verdict["status"] == "approved"
 
         # Close
-        closed = await close_review.fn(review_id=review_id, ctx=ctx)
+        closed = await close_review.fn(review_id=review_id, closer_role="proposer", ctx=ctx)
         assert closed["status"] == "closed"
 
     async def test_proposal_lifecycle_submit_reject_revise_approve(
@@ -573,7 +605,7 @@ class TestFullProposalLifecycle:
         assert approved["status"] == "approved"
 
         # Step 7: Close
-        closed = await close_review.fn(review_id=review_id, ctx=ctx)
+        closed = await close_review.fn(review_id=review_id, closer_role="proposer", ctx=ctx)
         assert closed["status"] == "closed"
 
         # Verify get_proposal still works on closed review

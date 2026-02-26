@@ -23,6 +23,8 @@ from gsd_review_broker.pool import ReviewerPool
 DB_FILENAME = "codex_review_broker.sqlite3"
 DB_CONFIG_DIRNAME = "gsd-review-broker"
 DB_PATH_ENV_VAR = "BROKER_DB_PATH"
+CONFIG_PATH_ENV_VAR = "BROKER_CONFIG_PATH"
+REPO_ROOT_ENV_VAR = "BROKER_REPO_ROOT"
 logger = logging.getLogger("gsd_review_broker")
 _PROACTOR_CONNECTION_LOST_CALLBACK = "_ProactorBasePipeTransport._call_connection_lost"
 
@@ -298,13 +300,15 @@ def resolve_db_path(repo_root: str | None) -> Path:
 
 
 async def _rollback_quietly(db: aiosqlite.Connection) -> None:
-    try:
+    with suppress(Exception):
         await db.execute("ROLLBACK")
-    except Exception:
-        pass
 
 
 def _repo_config_path(repo_root: str | None) -> Path:
+    configured_path = os.environ.get(CONFIG_PATH_ENV_VAR)
+    if configured_path:
+        return Path(configured_path).expanduser()
+
     base = Path(repo_root) if repo_root is not None else Path.cwd()
     return base / ".planning" / "config.json"
 
@@ -316,7 +320,14 @@ async def _check_idle_timeouts(ctx: AppContext) -> None:
     cutoff = f"-{int(pool.config.idle_timeout_seconds)} seconds"
     cursor = await ctx.db.execute(
         """SELECT id FROM reviewers
-           WHERE status = 'active' AND last_active_at < datetime('now', ?)""",
+           WHERE status = 'active'
+             AND last_active_at < datetime('now', ?)
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM reviews
+                 WHERE reviews.claimed_by = reviewers.id
+                   AND reviews.status != 'closed'
+             )""",
         (cutoff,),
     )
     rows = await cursor.fetchall()
@@ -331,7 +342,14 @@ async def _check_ttl_expiry(ctx: AppContext) -> None:
     cutoff = f"-{int(pool.config.max_ttl_seconds)} seconds"
     cursor = await ctx.db.execute(
         """SELECT id FROM reviewers
-           WHERE status = 'active' AND spawned_at < datetime('now', ?)""",
+           WHERE status = 'active'
+             AND spawned_at < datetime('now', ?)
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM reviews
+                 WHERE reviews.claimed_by = reviewers.id
+                   AND reviews.status != 'closed'
+             )""",
         (cutoff,),
     )
     rows = await cursor.fetchall()
@@ -475,9 +493,18 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     del server
     loop = asyncio.get_running_loop()
     restore_exception_handler = install_windows_proactor_noise_filter(loop)
-    repo_root = await discover_repo_root()
+    repo_root_override = os.environ.get(REPO_ROOT_ENV_VAR)
+    if repo_root_override:
+        repo_root = str(Path(repo_root_override).expanduser())
+    else:
+        repo_root = await discover_repo_root()
     db_path = resolve_db_path(repo_root)
     config_path = _repo_config_path(repo_root)
+    if repo_root_override:
+        logger.info("Using repo root override from %s: %s", REPO_ROOT_ENV_VAR, repo_root)
+    config_path_override = os.environ.get(CONFIG_PATH_ENV_VAR)
+    if config_path_override:
+        logger.info("Using config path override from %s: %s", CONFIG_PATH_ENV_VAR, config_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db = await aiosqlite.connect(
         str(db_path),

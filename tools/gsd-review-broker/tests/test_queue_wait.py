@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 from gsd_review_broker.notifications import QUEUE_TOPIC
-from gsd_review_broker.tools import create_review, list_reviews
+from gsd_review_broker.tools import (
+    add_message,
+    claim_review,
+    create_review,
+    list_reviews,
+    submit_verdict,
+)
 
 if TYPE_CHECKING:
     from conftest import MockContext
@@ -129,8 +135,6 @@ class TestQueueTopicOnRevision:
         review_id = created["review_id"]
 
         # Move to changes_requested so we can revise
-        from gsd_review_broker.tools import claim_review, submit_verdict
-
         await claim_review.fn(review_id=review_id, reviewer_id="r1", ctx=ctx)
         await submit_verdict.fn(
             review_id=review_id, verdict="changes_requested", reason="fix it", ctx=ctx
@@ -151,6 +155,31 @@ class TestQueueTopicOnRevision:
             )
         assert result.get("revised") is True
 
+        version_after = app.notifications.current_version(QUEUE_TOPIC)
+        assert version_after > version_before
+
+    async def test_proposer_followup_message_on_changes_requested_fires_queue_topic(
+        self, ctx: MockContext
+    ) -> None:
+        """Proposer follow-up on changes_requested requeues and notifies queue topic."""
+        app = ctx.lifespan_context
+        created = await _create_pending(ctx, intent="discussion follow-up")
+        review_id = created["review_id"]
+        await claim_review.fn(review_id=review_id, reviewer_id="r1", ctx=ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Need clarification",
+            ctx=ctx,
+        )
+        version_before = app.notifications.current_version(QUEUE_TOPIC)
+        result = await add_message.fn(
+            review_id=review_id,
+            sender_role="proposer",
+            body="Can you clarify the failure mode?",
+            ctx=ctx,
+        )
+        assert "message_id" in result
         version_after = app.notifications.current_version(QUEUE_TOPIC)
         assert version_after > version_before
 

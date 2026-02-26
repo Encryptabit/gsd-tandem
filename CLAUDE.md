@@ -1,6 +1,6 @@
 ## Tandem Review
 
-When `tandem_enabled=true` in `.planning/config.json` and the review broker is running:
+When `review.enabled=true` in `.planning/config.json` and the review broker is running:
 
 All planned artifacts and code changes should be submitted through the broker before committing.
 The discuss-phase, plan-phase, execute-phase, and verify-work orchestrators handle this automatically.

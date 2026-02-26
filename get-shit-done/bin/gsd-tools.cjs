@@ -22,6 +22,10 @@
  *   list-todos [area]                  Count and enumerate pending todos
  *   verify-path-exists <path>          Check file/directory existence
  *   config-ensure-section              Initialize .planning/config.json
+ *   review record                       Record approved/skip review gate event
+ *   review assert                       Enforce required review gate presence
+ *   review invalidate                   Invalidate prior review gate records
+ *   review override                     Record explicit manual gate override
  *   history-digest                     Aggregate all SUMMARY.md data
  *   summary-extract <path> [--fields]  Extract structured data from SUMMARY.md
  *   state-snapshot                     Structured parse of STATE.md
@@ -121,6 +125,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 // ─── Model Profile Table ─────────────────────────────────────────────────────
@@ -157,6 +162,21 @@ function safeReadFile(filePath) {
   }
 }
 
+function getValueByPath(obj, keyPath) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const keys = String(keyPath || '').split('.').filter(Boolean);
+  if (keys.length === 0) return undefined;
+
+  let current = obj;
+  for (const key of keys) {
+    if (current === undefined || current === null || typeof current !== 'object') {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
 function loadConfig(cwd) {
   const configPath = path.join(cwd, '.planning', 'config.json');
   const defaults = {
@@ -171,6 +191,33 @@ function loadConfig(cwd) {
     verifier: true,
     parallelization: true,
     brave_search: false,
+    review_granularity: 'per_task',
+    execution_mode: 'blocking',
+    reviewer_pool: {
+      workspace_path: 'auto',
+      model: 'gpt-5.3-codex',
+      reasoning_effort: 'high',
+      wsl_distro: 'Ubuntu',
+      max_pool_size: 3,
+      scaling_ratio: 3.0,
+      idle_timeout_seconds: 300.0,
+      max_ttl_seconds: 3600.0,
+      claim_timeout_seconds: 1200.0,
+      spawn_cooldown_seconds: 10.0,
+      prompt_template_path: 'reviewer_prompt.md',
+      background_check_interval_seconds: 30.0,
+    },
+    review: {
+      enabled: true,
+      fail_mode: 'closed',
+      allow_override: false,
+      required_gates: {
+        discuss: true,
+        plan: true,
+        execute: true,
+        verify: true,
+      },
+    },
   };
 
   try {
@@ -192,6 +239,25 @@ function loadConfig(cwd) {
       return defaults.parallelization;
     })();
 
+    const review = (() => {
+      const parsedReview = get('review');
+      const defaultReview = defaults.review;
+      const parsedRequired = parsedReview && typeof parsedReview.required_gates === 'object'
+        ? parsedReview.required_gates
+        : {};
+      return {
+        enabled: parsedReview?.enabled !== undefined ? !!parsedReview.enabled : defaultReview.enabled,
+        fail_mode: parsedReview?.fail_mode === 'open' ? 'open' : defaultReview.fail_mode,
+        allow_override: parsedReview?.allow_override !== undefined
+          ? !!parsedReview.allow_override
+          : defaultReview.allow_override,
+        required_gates: {
+          ...defaultReview.required_gates,
+          ...(parsedRequired || {}),
+        },
+      };
+    })();
+
     return {
       model_profile: get('model_profile') ?? defaults.model_profile,
       commit_docs: get('commit_docs', { section: 'planning', field: 'commit_docs' }) ?? defaults.commit_docs,
@@ -204,6 +270,10 @@ function loadConfig(cwd) {
       verifier: get('verifier', { section: 'workflow', field: 'verifier' }) ?? defaults.verifier,
       parallelization,
       brave_search: get('brave_search') ?? defaults.brave_search,
+      review_granularity: get('review_granularity') ?? defaults.review_granularity,
+      execution_mode: get('execution_mode') ?? defaults.execution_mode,
+      reviewer_pool: get('reviewer_pool') ?? defaults.reviewer_pool,
+      review,
     };
   } catch {
     return defaults;
@@ -595,9 +665,64 @@ function cmdConfigEnsureSection(cwd, raw) {
 
   // Check if config already exists
   if (fs.existsSync(configPath)) {
-    const result = { created: false, reason: 'already_exists' };
-    output(result, raw, 'exists');
-    return;
+    try {
+      const existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const reviewDefaults = {
+        enabled: true,
+        fail_mode: 'closed',
+        allow_override: false,
+        required_gates: {
+          discuss: true,
+          plan: true,
+          execute: true,
+          verify: true,
+        },
+      };
+      const reviewerPoolDefaults = {
+        workspace_path: 'auto',
+        model: 'gpt-5.3-codex',
+        reasoning_effort: 'high',
+        wsl_distro: 'Ubuntu',
+        max_pool_size: 3,
+        scaling_ratio: 3.0,
+        idle_timeout_seconds: 300.0,
+        max_ttl_seconds: 3600.0,
+        claim_timeout_seconds: 1200.0,
+        spawn_cooldown_seconds: 10.0,
+        prompt_template_path: 'reviewer_prompt.md',
+        background_check_interval_seconds: 30.0,
+      };
+      const existingWithoutLegacy = { ...existing };
+      delete existingWithoutLegacy.tandem_enabled;
+      const resolvedReviewEnabled = existing.review?.enabled !== undefined
+        ? !!existing.review.enabled
+        : reviewDefaults.enabled;
+      const next = {
+        ...existingWithoutLegacy,
+        review_granularity: existing.review_granularity !== undefined ? existing.review_granularity : 'per_task',
+        execution_mode: existing.execution_mode !== undefined ? existing.execution_mode : 'blocking',
+        reviewer_pool: existing.reviewer_pool !== undefined ? existing.reviewer_pool : reviewerPoolDefaults,
+        review: {
+          ...reviewDefaults,
+          ...(existing.review || {}),
+          enabled: resolvedReviewEnabled,
+          required_gates: {
+            ...reviewDefaults.required_gates,
+            ...(existing.review?.required_gates || {}),
+          },
+        },
+      };
+
+      const changed = JSON.stringify(existing) !== JSON.stringify(next);
+      if (changed) {
+        fs.writeFileSync(configPath, JSON.stringify(next, null, 2), 'utf-8');
+      }
+      const result = { created: false, updated: changed, reason: changed ? 'backfilled_review_defaults' : 'already_exists' };
+      output(result, raw, changed ? 'updated' : 'exists');
+      return;
+    } catch (err) {
+      error('Failed to read existing config.json: ' + err.message);
+    }
   }
 
   // Detect Brave Search API key availability
@@ -631,11 +756,49 @@ function cmdConfigEnsureSection(cwd, raw) {
     },
     parallelization: true,
     brave_search: hasBraveSearch,
+    review_granularity: 'per_task',
+    execution_mode: 'blocking',
+    reviewer_pool: {
+      workspace_path: 'auto',
+      model: 'gpt-5.3-codex',
+      reasoning_effort: 'high',
+      wsl_distro: 'Ubuntu',
+      max_pool_size: 3,
+      scaling_ratio: 3.0,
+      idle_timeout_seconds: 300.0,
+      max_ttl_seconds: 3600.0,
+      claim_timeout_seconds: 1200.0,
+      spawn_cooldown_seconds: 10.0,
+      prompt_template_path: 'reviewer_prompt.md',
+      background_check_interval_seconds: 30.0,
+    },
+    review: {
+      enabled: true,
+      fail_mode: 'closed',
+      allow_override: false,
+      required_gates: {
+        discuss: true,
+        plan: true,
+        execute: true,
+        verify: true,
+      },
+    },
   };
   const defaults = {
     ...hardcoded,
     ...userDefaults,
     workflow: { ...hardcoded.workflow, ...(userDefaults.workflow || {}) },
+    reviewer_pool: userDefaults.reviewer_pool !== undefined
+      ? userDefaults.reviewer_pool
+      : hardcoded.reviewer_pool,
+    review: {
+      ...hardcoded.review,
+      ...(userDefaults.review || {}),
+      required_gates: {
+        ...hardcoded.review.required_gates,
+        ...(userDefaults.review?.required_gates || {}),
+      },
+    },
   };
 
   try {
@@ -652,6 +815,9 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
 
   if (!keyPath) {
     error('Usage: config-set <key.path> <value>');
+  }
+  if (keyPath === 'tandem_enabled') {
+    error('tandem_enabled is no longer supported; use review.enabled');
   }
 
   // Parse value (handle booleans and numbers)
@@ -698,6 +864,9 @@ function cmdConfigGet(cwd, keyPath, raw) {
   if (!keyPath) {
     error('Usage: config-get <key.path>');
   }
+  if (keyPath === 'tandem_enabled') {
+    error('tandem_enabled is no longer supported; use review.enabled');
+  }
 
   let config = {};
   try {
@@ -711,21 +880,356 @@ function cmdConfigGet(cwd, keyPath, raw) {
     error('Failed to read config.json: ' + err.message);
   }
 
-  // Traverse dot-notation path (e.g., "workflow.auto_advance")
-  const keys = keyPath.split('.');
-  let current = config;
-  for (const key of keys) {
-    if (current === undefined || current === null || typeof current !== 'object') {
-      error(`Key not found: ${keyPath}`);
-    }
-    current = current[key];
-  }
-
+  let current = getValueByPath(config, keyPath);
   if (current === undefined) {
-    error(`Key not found: ${keyPath}`);
+    const normalized = loadConfig(cwd);
+    current = getValueByPath(normalized, keyPath);
   }
+  if (current === undefined) error(`Key not found: ${keyPath}`);
 
   output(current, raw, String(current));
+}
+
+// ─── Review Ledger & Enforcement ───────────────────────────────────────────────
+
+const VALID_REVIEW_GATES = new Set(['discuss', 'plan', 'execute', 'verify']);
+
+function canonicalizePhase(value) {
+  if (value === undefined || value === null) return null;
+  const input = String(value).trim();
+  const match = input.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) return input;
+  const major = String(parseInt(match[1], 10));
+  if (!match[2]) return major;
+  const minor = String(parseInt(match[2], 10));
+  return `${major}.${minor}`;
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf-8').digest('hex');
+}
+
+function getReviewConfig(config) {
+  const defaults = {
+    enabled: true,
+    fail_mode: 'closed',
+    allow_override: false,
+    required_gates: {
+      discuss: true,
+      plan: true,
+      execute: true,
+      verify: true,
+    },
+  };
+  const review = config?.review || {};
+  return {
+    enabled: review.enabled !== undefined ? !!review.enabled : defaults.enabled,
+    fail_mode: review.fail_mode === 'open' ? 'open' : defaults.fail_mode,
+    allow_override: review.allow_override !== undefined ? !!review.allow_override : defaults.allow_override,
+    required_gates: {
+      ...defaults.required_gates,
+      ...(review.required_gates || {}),
+    },
+  };
+}
+
+function getReviewLedgerPath(cwd) {
+  return path.join(cwd, '.planning', 'review-ledger.json');
+}
+
+function loadReviewLedger(cwd) {
+  const ledgerPath = getReviewLedgerPath(cwd);
+  const emptyLedger = {
+    version: 1,
+    entries: [],
+    overrides: [],
+    updated_at: null,
+  };
+
+  if (!fs.existsSync(ledgerPath)) {
+    return emptyLedger;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+    return {
+      version: parsed.version || 1,
+      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      overrides: Array.isArray(parsed.overrides) ? parsed.overrides : [],
+      updated_at: parsed.updated_at || null,
+    };
+  } catch (err) {
+    error(`Failed to parse review ledger: ${err.message}`);
+  }
+}
+
+function saveReviewLedger(cwd, ledger) {
+  const ledgerPath = getReviewLedgerPath(cwd);
+  const planningDir = path.join(cwd, '.planning');
+  fs.mkdirSync(planningDir, { recursive: true });
+  const payload = {
+    ...ledger,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(ledgerPath, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+function normalizeReviewGate(gate) {
+  if (!gate) return null;
+  const normalized = String(gate).trim().toLowerCase();
+  if (!VALID_REVIEW_GATES.has(normalized)) {
+    error(`Invalid review gate "${gate}". Valid gates: discuss, plan, execute, verify`);
+  }
+  return normalized;
+}
+
+function activeGateEntries(ledger, gate, phase) {
+  return (ledger.entries || [])
+    .filter(e => e.gate === gate && e.phase === phase && !e.invalidated_at);
+}
+
+function activeGateOverrides(ledger, gate, phase) {
+  return (ledger.overrides || [])
+    .filter(e => e.gate === gate && e.phase === phase && !e.invalidated_at);
+}
+
+function getLatestByTimestamp(items) {
+  if (!items || items.length === 0) return null;
+  const sorted = [...items].sort((a, b) => {
+    const aTs = a.recorded_at || '';
+    const bTs = b.recorded_at || '';
+    return aTs.localeCompare(bTs);
+  });
+  return sorted[sorted.length - 1];
+}
+
+function reviewAssertInternal(cwd, options) {
+  const config = loadConfig(cwd);
+  const review = getReviewConfig(config);
+  const gate = normalizeReviewGate(options.gate);
+  const phase = canonicalizePhase(options.phase);
+  const providedHash = options.hash ? String(options.hash).trim() : null;
+
+  if (!gate) {
+    error('review assert requires --gate');
+  }
+  if (!phase) {
+    error('review assert requires --phase');
+  }
+
+  const gateRequired = !!review.enabled && !!review.required_gates[gate];
+  if (!gateRequired) {
+    return {
+      ok: true,
+      enforced: false,
+      gate,
+      phase,
+      reason: review.enabled ? 'gate_not_required' : 'review_disabled',
+    };
+  }
+
+  const ledger = loadReviewLedger(cwd);
+  const override = getLatestByTimestamp(activeGateOverrides(ledger, gate, phase));
+  if (override) {
+    return {
+      ok: true,
+      enforced: true,
+      gate,
+      phase,
+      overridden: true,
+      override_reason: override.reason || null,
+      override_id: override.override_id || null,
+    };
+  }
+
+  const approved = getLatestByTimestamp(
+    activeGateEntries(ledger, gate, phase)
+      .filter(e => e.status === 'approved' || e.status === 'skipped')
+  );
+
+  if (!approved) {
+    const msg = `Missing approved ${gate} review gate for phase ${phase}`;
+    if (review.fail_mode === 'open') {
+      return {
+        ok: true,
+        enforced: true,
+        gate,
+        phase,
+        fail_open: true,
+        warning: msg,
+      };
+    }
+    error(`${msg}. Use review record or resolve broker review first.`);
+  }
+
+  if (providedHash) {
+    if (!approved.artifact_hash) {
+      const msg = `Approved ${gate} review for phase ${phase} has no artifact hash`;
+      if (review.fail_mode === 'open') {
+        return {
+          ok: true,
+          enforced: true,
+          gate,
+          phase,
+          review_id: approved.review_id || null,
+          fail_open: true,
+          warning: msg,
+        };
+      }
+      error(`${msg}. Re-run review and record a hash before progressing.`);
+    }
+    if (approved.artifact_hash !== providedHash) {
+      const msg = `${gate} review hash mismatch for phase ${phase}`;
+      if (review.fail_mode === 'open') {
+        return {
+          ok: true,
+          enforced: true,
+          gate,
+          phase,
+          review_id: approved.review_id || null,
+          fail_open: true,
+          warning: msg,
+          expected_hash: approved.artifact_hash,
+          actual_hash: providedHash,
+        };
+      }
+      error(`${msg}. Approved hash ${approved.artifact_hash} != current hash ${providedHash}`);
+    }
+  }
+
+  return {
+    ok: true,
+    enforced: true,
+    gate,
+    phase,
+    review_id: approved.review_id || null,
+    status: approved.status || 'approved',
+    artifact_hash: approved.artifact_hash || null,
+  };
+}
+
+function cmdReviewRecord(cwd, options, raw) {
+  const gate = normalizeReviewGate(options.gate);
+  const phase = canonicalizePhase(options.phase);
+  const reviewId = options.review_id ? String(options.review_id).trim() : null;
+  const note = options.note ? String(options.note).trim() : null;
+  const status = options.status ? String(options.status).trim().toLowerCase() : 'approved';
+  const hash = options.hash ? String(options.hash).trim() : null;
+
+  if (!gate) error('review record requires --gate');
+  if (!phase) error('review record requires --phase');
+  if (!['approved', 'skipped'].includes(status)) {
+    error('review record --status must be "approved" or "skipped"');
+  }
+  if (hash && !/^[a-f0-9]{64}$/i.test(hash)) {
+    error('review record --hash must be a sha256 hex string');
+  }
+
+  const ledger = loadReviewLedger(cwd);
+  const entry = {
+    entry_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    gate,
+    phase,
+    review_id: reviewId,
+    status,
+    artifact_hash: hash,
+    note,
+    recorded_at: new Date().toISOString(),
+  };
+  ledger.entries.push(entry);
+  saveReviewLedger(cwd, ledger);
+
+  output({
+    recorded: true,
+    gate,
+    phase,
+    review_id: reviewId,
+    status,
+    artifact_hash: hash,
+    ledger_path: '.planning/review-ledger.json',
+  }, raw, entry.entry_id);
+}
+
+function cmdReviewAssert(cwd, options, raw) {
+  const result = reviewAssertInternal(cwd, options);
+  output(result, raw, result.ok ? 'ok' : 'failed');
+}
+
+function cmdReviewInvalidate(cwd, options, raw) {
+  const gate = normalizeReviewGate(options.gate);
+  const phase = canonicalizePhase(options.phase);
+  const reason = options.reason ? String(options.reason).trim() : null;
+
+  if (!gate) error('review invalidate requires --gate');
+  if (!phase) error('review invalidate requires --phase');
+
+  const ledger = loadReviewLedger(cwd);
+  const now = new Date().toISOString();
+
+  let invalidatedEntries = 0;
+  for (const entry of ledger.entries) {
+    if (entry.gate === gate && entry.phase === phase && !entry.invalidated_at) {
+      entry.invalidated_at = now;
+      entry.invalidated_reason = reason || 'manual_invalidate';
+      invalidatedEntries++;
+    }
+  }
+
+  let invalidatedOverrides = 0;
+  for (const override of ledger.overrides) {
+    if (override.gate === gate && override.phase === phase && !override.invalidated_at) {
+      override.invalidated_at = now;
+      override.invalidated_reason = reason || 'manual_invalidate';
+      invalidatedOverrides++;
+    }
+  }
+
+  if (invalidatedEntries > 0 || invalidatedOverrides > 0) {
+    saveReviewLedger(cwd, ledger);
+  }
+
+  output({
+    invalidated: true,
+    gate,
+    phase,
+    invalidated_entries: invalidatedEntries,
+    invalidated_overrides: invalidatedOverrides,
+  }, raw, String(invalidatedEntries + invalidatedOverrides));
+}
+
+function cmdReviewOverride(cwd, options, raw) {
+  const config = loadConfig(cwd);
+  const review = getReviewConfig(config);
+  if (!review.allow_override) {
+    error('review override is disabled by config (review.allow_override=false)');
+  }
+
+  const gate = normalizeReviewGate(options.gate);
+  const phase = canonicalizePhase(options.phase);
+  const reason = options.reason ? String(options.reason).trim() : null;
+  if (!gate) error('review override requires --gate');
+  if (!phase) error('review override requires --phase');
+  if (!reason) error('review override requires --reason');
+
+  const ledger = loadReviewLedger(cwd);
+  const override = {
+    override_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    gate,
+    phase,
+    reason,
+    recorded_at: new Date().toISOString(),
+  };
+  ledger.overrides.push(override);
+  saveReviewLedger(cwd, ledger);
+
+  output({
+    overridden: true,
+    gate,
+    phase,
+    reason,
+    override_id: override.override_id,
+    ledger_path: '.planning/review-ledger.json',
+  }, raw, override.override_id);
 }
 
 function cmdHistoryDigest(cwd, raw) {
@@ -1096,6 +1600,9 @@ function cmdStateLoad(cwd, raw) {
       `research=${c.research}`,
       `plan_checker=${c.plan_checker}`,
       `verifier=${c.verifier}`,
+      `review_enabled=${c.review?.enabled}`,
+      `review_fail_mode=${c.review?.fail_mode}`,
+      `review_allow_override=${c.review?.allow_override}`,
       `config_exists=${configExists}`,
       `roadmap_exists=${roadmapExists}`,
       `state_exists=${stateExists}`,
@@ -1492,6 +1999,39 @@ function cmdFindPhase(cwd, phase, raw) {
   }
 }
 
+function inferReviewAssertionsForFiles(files) {
+  const assertions = new Map();
+  const addAssertion = (gate, phase) => {
+    if (!phase) return;
+    const normalizedPhase = canonicalizePhase(phase);
+    const key = `${gate}:${normalizedPhase}`;
+    if (!assertions.has(key)) {
+      assertions.set(key, { gate, phase: normalizedPhase });
+    }
+  };
+
+  for (const file of files || []) {
+    const normalized = String(file || '').replace(/\\/g, '/');
+    let match = normalized.match(/\/(\d+(?:\.\d+)?)-CONTEXT\.md$/i);
+    if (match) {
+      addAssertion('discuss', match[1]);
+      continue;
+    }
+    match = normalized.match(/\/(\d+(?:\.\d+)?)-UAT\.md$/i);
+    if (match) {
+      addAssertion('verify', match[1]);
+      continue;
+    }
+    match = normalized.match(/\/(\d+(?:\.\d+)?)-\d{2}-PLAN\.md$/i);
+    if (match) {
+      addAssertion('plan', match[1]);
+      continue;
+    }
+  }
+
+  return [...assertions.values()];
+}
+
 function cmdCommit(cwd, message, files, raw, amend) {
   if (!message && !amend) {
     error('commit message required');
@@ -1515,6 +2055,10 @@ function cmdCommit(cwd, message, files, raw, amend) {
 
   // Stage files
   const filesToStage = files && files.length > 0 ? files : ['.planning/'];
+  const reviewAssertions = inferReviewAssertionsForFiles(filesToStage);
+  for (const assertion of reviewAssertions) {
+    reviewAssertInternal(cwd, assertion);
+  }
   for (const file of filesToStage) {
     execGit(cwd, ['add', file]);
   }
@@ -3068,7 +3612,6 @@ function cmdRoadmapUpdatePlanProgress(cwd, phaseNum, raw) {
   if (!phaseInfo) {
     error(`Phase ${phaseNum} not found`);
   }
-
   const planCount = phaseInfo.plans.length;
   const summaryCount = phaseInfo.summaries.length;
 
@@ -3149,6 +3692,11 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
   if (!phaseInfo) {
     error(`Phase ${phaseNum} not found`);
   }
+  // Core invariant: phase completion requires an approved execution review gate.
+  reviewAssertInternal(cwd, {
+    gate: 'execute',
+    phase: phaseInfo.phase_number || phaseNum,
+  });
 
   const planCount = phaseInfo.plans.length;
   const summaryCount = phaseInfo.summaries.length;
@@ -3222,25 +3770,40 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
   let nextPhaseName = null;
   let isLastPhase = true;
 
+  // Prefer ROADMAP ordering because future phases may not have directories yet.
   try {
-    const entries = fs.readdirSync(phasesDir, { withFileTypes: true });
-    const dirs = entries.filter(e => e.isDirectory()).map(e => e.name).sort();
-    const currentFloat = parseFloat(phaseNum);
+    const roadmapPhases = listRoadmapPhasesInternal(cwd);
+    const currentPhaseNumber = phaseInfo.phase_number || phaseNum;
+    const nextRoadmapPhase = roadmapPhases.find(
+      p => comparePhaseNumbers(p.number, currentPhaseNumber) > 0
+    );
 
-    // Find the next phase directory after current
-    for (const dir of dirs) {
-      const dm = dir.match(/^(\d+(?:\.\d+)?)-?(.*)/);
-      if (dm) {
-        const dirFloat = parseFloat(dm[1]);
-        if (dirFloat > currentFloat) {
+    if (nextRoadmapPhase) {
+      nextPhaseNum = normalizePhaseName(nextRoadmapPhase.number);
+      nextPhaseName = nextRoadmapPhase.name;
+      isLastPhase = false;
+    }
+  } catch {}
+
+  // Fallback to on-disk directories if ROADMAP lookup fails or is unavailable.
+  if (!nextPhaseNum) {
+    try {
+      const entries = fs.readdirSync(phasesDir, { withFileTypes: true });
+      const dirs = entries.filter(e => e.isDirectory()).map(e => e.name).sort();
+      const currentPhaseNumber = phaseInfo.phase_number || phaseNum;
+
+      // Find the next phase directory after current
+      for (const dir of dirs) {
+        const dm = dir.match(/^(\d+(?:\.\d+)?)-?(.*)/);
+        if (dm && comparePhaseNumbers(dm[1], currentPhaseNumber) > 0) {
           nextPhaseNum = dm[1];
           nextPhaseName = dm[2] || null;
           isLastPhase = false;
           break;
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // Update STATE.md
   if (fs.existsSync(statePath)) {
@@ -3751,6 +4314,33 @@ function cmdValidateHealth(cwd, options, raw) {
               plan_checker: true,
               verifier: true,
               parallelization: true,
+              review_granularity: 'per_task',
+              execution_mode: 'blocking',
+              reviewer_pool: {
+                workspace_path: 'auto',
+                model: 'gpt-5.3-codex',
+                reasoning_effort: 'high',
+                wsl_distro: 'Ubuntu',
+                max_pool_size: 3,
+                scaling_ratio: 3.0,
+                idle_timeout_seconds: 300.0,
+                max_ttl_seconds: 3600.0,
+                claim_timeout_seconds: 1200.0,
+                spawn_cooldown_seconds: 10.0,
+                prompt_template_path: 'reviewer_prompt.md',
+                background_check_interval_seconds: 30.0,
+              },
+              review: {
+                enabled: true,
+                fail_mode: 'closed',
+                allow_override: false,
+                required_gates: {
+                  discuss: true,
+                  plan: true,
+                  execute: true,
+                  verify: true,
+                },
+              },
             };
             fs.writeFileSync(configPath, JSON.stringify(defaults, null, 2), 'utf-8');
             repairActions.push({ action: repair, success: true, path: 'config.json' });
@@ -4135,6 +4725,43 @@ function getRoadmapPhaseInternal(cwd, phaseNum) {
   }
 }
 
+function comparePhaseNumbers(a, b) {
+  const aParts = String(a).split('.').map(p => parseInt(p, 10));
+  const bParts = String(b).split('.').map(p => parseInt(p, 10));
+  const maxLen = Math.max(aParts.length, bParts.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const av = Number.isFinite(aParts[i]) ? aParts[i] : 0;
+    const bv = Number.isFinite(bParts[i]) ? bParts[i] : 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
+}
+
+function listRoadmapPhasesInternal(cwd) {
+  const roadmapPath = path.join(cwd, '.planning', 'ROADMAP.md');
+  if (!fs.existsSync(roadmapPath)) return [];
+
+  try {
+    const content = fs.readFileSync(roadmapPath, 'utf-8');
+    const phases = [];
+    const phasePattern = /#{2,4}\s*Phase\s+(\d+(?:\.\d+)?)\s*:\s*([^\n]+)/gi;
+    let match;
+
+    while ((match = phasePattern.exec(content)) !== null) {
+      phases.push({
+        number: match[1],
+        name: (match[2] || '').trim() || null,
+      });
+    }
+
+    phases.sort((a, b) => comparePhaseNumbers(a.number, b.number));
+    return phases;
+  } catch {
+    return [];
+  }
+}
+
 function pathExistsInternal(cwd, targetPath) {
   const fullPath = path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath);
   try {
@@ -4185,6 +4812,10 @@ function cmdInitExecutePhase(cwd, phase, includes, raw) {
     phase_branch_template: config.phase_branch_template,
     milestone_branch_template: config.milestone_branch_template,
     verifier_enabled: config.verifier,
+    review_enabled: config.review?.enabled ?? true,
+    review_fail_mode: config.review?.fail_mode ?? 'closed',
+    review_gate_execute_required: config.review?.required_gates?.execute ?? true,
+    review_gate_verify_required: config.review?.required_gates?.verify ?? true,
 
     // Phase info
     phase_found: !!phaseInfo,
@@ -4254,6 +4885,9 @@ function cmdInitPlanPhase(cwd, phase, includes, raw) {
     research_enabled: config.research,
     plan_checker_enabled: config.plan_checker,
     commit_docs: config.commit_docs,
+    review_enabled: config.review?.enabled ?? true,
+    review_fail_mode: config.review?.fail_mode ?? 'closed',
+    review_gate_plan_required: config.review?.required_gates?.plan ?? true,
 
     // Phase info
     phase_found: !!phaseInfo,
@@ -4366,6 +5000,9 @@ function cmdInitNewProject(cwd, raw) {
 
     // Config
     commit_docs: config.commit_docs,
+    review_enabled: config.review?.enabled ?? true,
+    review_fail_mode: config.review?.fail_mode ?? 'closed',
+    review_gate_verify_required: config.review?.required_gates?.verify ?? true,
 
     // Existing state
     project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
@@ -4846,7 +5483,7 @@ async function main() {
   const cwd = process.cwd();
 
   if (!command) {
-    error('Usage: gsd-tools <command> [args] [--raw]\nCommands: state, resolve-model, find-phase, commit, verify-summary, verify, frontmatter, template, generate-slug, current-timestamp, list-todos, verify-path-exists, config-ensure-section, init');
+    error('Usage: gsd-tools <command> [args] [--raw]\nCommands: state, resolve-model, find-phase, commit, verify-summary, verify, frontmatter, template, generate-slug, current-timestamp, list-todos, verify-path-exists, config-ensure-section, review, init');
   }
 
   switch (command) {
@@ -5039,6 +5676,39 @@ async function main() {
 
     case 'config-get': {
       cmdConfigGet(cwd, args[1], raw);
+      break;
+    }
+
+    case 'review': {
+      const subcommand = args[1];
+      const gateIndex = args.indexOf('--gate');
+      const phaseIndex = args.indexOf('--phase');
+      const reviewIdIndex = args.indexOf('--review-id');
+      const hashIndex = args.indexOf('--hash');
+      const noteIndex = args.indexOf('--note');
+      const statusIndex = args.indexOf('--status');
+      const reasonIndex = args.indexOf('--reason');
+      const options = {
+        gate: gateIndex !== -1 ? args[gateIndex + 1] : null,
+        phase: phaseIndex !== -1 ? args[phaseIndex + 1] : null,
+        review_id: reviewIdIndex !== -1 ? args[reviewIdIndex + 1] : null,
+        hash: hashIndex !== -1 ? args[hashIndex + 1] : null,
+        note: noteIndex !== -1 ? args[noteIndex + 1] : null,
+        status: statusIndex !== -1 ? args[statusIndex + 1] : null,
+        reason: reasonIndex !== -1 ? args[reasonIndex + 1] : null,
+      };
+
+      if (subcommand === 'record') {
+        cmdReviewRecord(cwd, options, raw);
+      } else if (subcommand === 'assert') {
+        cmdReviewAssert(cwd, options, raw);
+      } else if (subcommand === 'invalidate') {
+        cmdReviewInvalidate(cwd, options, raw);
+      } else if (subcommand === 'override') {
+        cmdReviewOverride(cwd, options, raw);
+      } else {
+        error('Unknown review subcommand. Available: record, assert, invalidate, override');
+      }
       break;
     }
 

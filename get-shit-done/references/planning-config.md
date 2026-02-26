@@ -8,6 +8,33 @@ Configuration options for `.planning/` directory behavior.
   "commit_docs": true,
   "search_gitignored": false
 },
+"review": {
+  "enabled": true,
+  "fail_mode": "closed",
+  "allow_override": false,
+  "required_gates": {
+    "discuss": true,
+    "plan": true,
+    "execute": true,
+    "verify": true
+  }
+},
+"review_granularity": "per_task",
+"execution_mode": "blocking",
+"reviewer_pool": {
+  "workspace_path": "auto",
+  "model": "gpt-5.3-codex",
+  "reasoning_effort": "high",
+  "wsl_distro": "Ubuntu",
+  "max_pool_size": 3,
+  "scaling_ratio": 3.0,
+  "idle_timeout_seconds": 300.0,
+  "max_ttl_seconds": 3600.0,
+  "claim_timeout_seconds": 1200.0,
+  "spawn_cooldown_seconds": 10.0,
+  "prompt_template_path": "reviewer_prompt.md",
+  "background_check_interval_seconds": 30.0
+},
 "git": {
   "branching_strategy": "none",
   "phase_branch_template": "gsd/phase-{phase}-{slug}",
@@ -19,6 +46,13 @@ Configuration options for `.planning/` directory behavior.
 |--------|---------|-------------|
 | `commit_docs` | `true` | Whether to commit planning artifacts to git |
 | `search_gitignored` | `false` | Add `--no-ignore` to broad rg searches |
+| `review.enabled` | `true` | Require review gate approvals for configured stages |
+| `review.fail_mode` | `"closed"` | `"closed"` blocks progression; `"open"` logs warnings only |
+| `review.allow_override` | `false` | Allow explicit audited `review override` bypass |
+| `review.required_gates.*` | `true` | Per-stage enforcement for `discuss`, `plan`, `execute`, `verify` |
+| `review_granularity` | `"per_task"` | Tandem review grouping strategy (`per_task` or `per_plan`) |
+| `execution_mode` | `"blocking"` | Tandem behavior (`blocking` or `optimistic`) |
+| `reviewer_pool` | object | Auto-reviewer spawn/scaling configuration for broker lifecycle |
 | `git.branching_strategy` | `"none"` | Git branching approach: `"none"`, `"phase"`, or `"milestone"` |
 | `git.phase_branch_template` | `"gsd/phase-{phase}-{slug}"` | Branch template for phase strategy |
 | `git.milestone_branch_template` | `"gsd/{milestone}-{slug}"` | Branch template for milestone strategy |

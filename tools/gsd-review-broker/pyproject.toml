@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "MCP review broker for GSD tandem pairing"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp>=2.14,<3",
+    "fastmcp>=3.0.2,<4",
     "aiosqlite>=0.22,<1",
     "unidiff>=0.7.5,<1",
     "python-dotenv>=1.0,<2",

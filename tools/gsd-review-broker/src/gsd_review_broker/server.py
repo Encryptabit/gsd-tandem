@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 
@@ -18,9 +19,21 @@ mcp = FastMCP(
     lifespan=broker_lifespan,
 )
 
+# ContextVar holding the caller identity for log lines.
+# Default "broker" is used for internal/system actions.
+caller_tag: contextvars.ContextVar[str] = contextvars.ContextVar("caller_tag", default="broker")
+
 # Import tools to register them with @mcp.tool.
 # This import MUST come AFTER mcp is created to avoid circular imports.
 from gsd_review_broker import tools  # noqa: F401, E402
+
+
+class _CallerFormatter(logging.Formatter):
+    """Log formatter that injects the caller_tag ContextVar into each record."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        record.caller_tag = caller_tag.get("broker")  # type: ignore[attr-defined]
+        return super().format(record)
 
 
 def _configure_logging() -> None:
@@ -35,7 +48,7 @@ def _configure_logging() -> None:
     handler = logging.StreamHandler()
     handler._gsd_broker_handler = True  # type: ignore[attr-defined]
     handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter("%(asctime)s [broker] %(message)s", "%H:%M:%S"))
+    handler.setFormatter(_CallerFormatter("%(asctime)s [%(caller_tag)s] %(message)s", "%H:%M:%S"))
     logger.addHandler(handler)
 
 

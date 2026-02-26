@@ -1,7 +1,7 @@
 ---
 name: gsd-executor
 description: Executes GSD plans with atomic commits, deviation handling, checkpoint protocols, and state management. Spawned by execute-phase orchestrator or execute-plan command.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__gsdreview__*
 color: yellow
 ---
 
@@ -181,20 +181,24 @@ Store the result for checkpoint handling below.
 <tandem_config>
 ## Tandem Configuration
 
-Executor subagents do NOT interact with the review broker directly.
-All broker interaction is handled by the execute-phase orchestrator.
+At executor start, read tandem settings from config:
+```bash
+node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-ensure-section >/dev/null 2>&1 || true
+REVIEW_ENABLED=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get review.enabled 2>/dev/null || echo "false")
+REVIEW_GRANULARITY=$(cat .planning/config.json 2>/dev/null | grep -o '"review_granularity"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "per_task")
+EXECUTION_MODE=$(cat .planning/config.json 2>/dev/null | grep -o '"execution_mode"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "blocking")
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+```
 
-The executor's role:
-1. Execute tasks normally (edit, test, commit)
-2. Return task results including git diff to the orchestrator
-3. The orchestrator submits the diff for review
+Executor subagents may call `mcp__gsdreview__*` directly when tandem is enabled.
+Do not force-disable tandem in this subagent.
 
-Record the starting git ref before the first task so orchestrator can reconstruct the exact plan diff:
+If `REVIEW_ENABLED=false`: Skip tandem review behavior and continue normal execution.
+
+Record the starting git ref before the first task so execution and review flows can reconstruct the exact plan diff:
 ```bash
 PLAN_START_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
 ```
-
-No tandem configuration is read or applied by the executor.
 </tandem_config>
 
 <checkpoint_protocol>

@@ -11,10 +11,10 @@ import pytest
 
 from gsd_review_broker.config_schema import SpawnConfig
 from gsd_review_broker.db import (
-    _check_reactive_scaling,
     _check_claim_timeouts,
     _check_dead_processes,
     _check_idle_timeouts,
+    _check_reactive_scaling,
     _check_ttl_expiry,
     _startup_ownership_sweep,
     _startup_reactive_scale_check,
@@ -23,7 +23,9 @@ from gsd_review_broker.db import (
 from gsd_review_broker.pool import ReviewerPool
 from gsd_review_broker.tools import (
     _reactive_scale_check,
+    add_message,
     claim_review,
+    close_review,
     create_review,
     kill_reviewer,
     list_reviewers,
@@ -50,11 +52,18 @@ class _FakeStdin:
         self.closed = True
 
 
+class _FakeStream:
+    async def readline(self) -> bytes:
+        return b""
+
+
 class _FakeProcess:
     def __init__(self, pid: int = 7777) -> None:
         self.pid = pid
         self.returncode: int | None = None
         self.stdin = _FakeStdin()
+        self.stdout = _FakeStream()
+        self.stderr = _FakeStream()
         self.terminated = False
 
     def terminate(self) -> None:
@@ -210,6 +219,89 @@ async def test_reactive_scaling_sufficient_reviewers(
     assert spawn_mock.await_count == 0
 
 
+async def test_proposer_followup_requeue_triggers_reactive_scaling(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, spawn_mock = await _attach_pool(ctx, tmp_path, monkeypatch)
+    real_create_task = asyncio.create_task
+    scheduled: list[asyncio.Task] = []
+
+    def _track_task(coro):  # noqa: ANN001
+        task = real_create_task(coro)
+        scheduled.append(task)
+        return task
+
+    monkeypatch.setattr("gsd_review_broker.tools.asyncio.create_task", _track_task)
+
+    created = await _create_review(ctx, intent="followup-scale")
+    await asyncio.gather(*scheduled)
+    scheduled.clear()
+    spawn_mock.reset_mock()
+
+    claim = await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id="reviewer-a",
+        ctx=ctx,
+    )
+    await submit_verdict.fn(
+        review_id=created["review_id"],
+        verdict="changes_requested",
+        reason="needs follow-up",
+        reviewer_id="reviewer-a",
+        claim_generation=claim["claim_generation"],
+        ctx=ctx,
+    )
+
+    pool._processes.clear()
+    await add_message.fn(
+        review_id=created["review_id"],
+        sender_role="proposer",
+        body="Can you clarify this blocker?",
+        ctx=ctx,
+    )
+    await asyncio.gather(*scheduled)
+    assert spawn_mock.await_count >= 1
+
+
+async def test_stale_requeue_reservation_is_auto_cleared_on_claim(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    spawned = await spawn_reviewer.fn(ctx=ctx)
+    reviewer_id = spawned["reviewer_id"]
+
+    created = await _create_review(ctx, intent="stale-reservation")
+    claim = await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id=reviewer_id,
+        ctx=ctx,
+    )
+    await submit_verdict.fn(
+        review_id=created["review_id"],
+        verdict="changes_requested",
+        reason="needs clarification",
+        reviewer_id=reviewer_id,
+        claim_generation=claim["claim_generation"],
+        ctx=ctx,
+    )
+    await add_message.fn(
+        review_id=created["review_id"],
+        sender_role="proposer",
+        body="Can you clarify this?",
+        ctx=ctx,
+    )
+
+    proc = pool._processes[reviewer_id]
+    proc.returncode = 0
+    fallback_claim = await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id="fallback-reviewer",
+        ctx=ctx,
+    )
+    assert fallback_claim["status"] == "claimed"
+    assert fallback_claim["claimed_by"] == "fallback-reviewer"
+
+
 async def test_background_reactive_scaling_pass(
     ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -244,6 +336,30 @@ async def test_idle_timeout_triggers_drain(
     assert row["status"] in {"draining", "terminated"}
 
 
+async def test_idle_timeout_skips_attached_active_reviewer(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    spawned = await spawn_reviewer.fn(ctx=ctx)
+    created = await _create_review(ctx, intent="idle-attached")
+    await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id=spawned["reviewer_id"],
+        ctx=ctx,
+    )
+    await ctx.lifespan_context.db.execute(
+        "UPDATE reviewers SET last_active_at = datetime('now', '-3600 seconds') WHERE id = ?",
+        (spawned["reviewer_id"],),
+    )
+    await _check_idle_timeouts(ctx.lifespan_context)
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status FROM reviewers WHERE id = ?",
+        (spawned["reviewer_id"],),
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "active"
+
+
 async def test_ttl_expiry_triggers_drain(
     ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -260,6 +376,30 @@ async def test_ttl_expiry_triggers_drain(
     )
     row = await cursor.fetchone()
     assert row["status"] in {"draining", "terminated"}
+
+
+async def test_ttl_expiry_skips_attached_active_reviewer(
+    ctx: MockContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _ = await _attach_pool(ctx, tmp_path, monkeypatch)
+    spawned = await spawn_reviewer.fn(ctx=ctx)
+    created = await _create_review(ctx, intent="ttl-attached")
+    await claim_review.fn(
+        review_id=created["review_id"],
+        reviewer_id=spawned["reviewer_id"],
+        ctx=ctx,
+    )
+    await ctx.lifespan_context.db.execute(
+        "UPDATE reviewers SET spawned_at = datetime('now', '-7200 seconds') WHERE id = ?",
+        (spawned["reviewer_id"],),
+    )
+    await _check_ttl_expiry(ctx.lifespan_context)
+    cursor = await ctx.lifespan_context.db.execute(
+        "SELECT status FROM reviewers WHERE id = ?",
+        (spawned["reviewer_id"],),
+    )
+    row = await cursor.fetchone()
+    assert row["status"] == "active"
 
 
 async def test_claim_timeout_triggers_reclaim(ctx: MockContext) -> None:
@@ -347,7 +487,9 @@ async def test_dead_process_cleanup(
 async def test_reject_claim_for_draining_reviewer(ctx: MockContext) -> None:
     await _insert_reviewer(ctx, "r-draining", session_token="x", status="draining")
     created = await _create_review(ctx)
-    result = await claim_review.fn(review_id=created["review_id"], reviewer_id="r-draining", ctx=ctx)
+    result = await claim_review.fn(
+        review_id=created["review_id"], reviewer_id="r-draining", ctx=ctx
+    )
     assert "error" in result
 
 
@@ -372,6 +514,11 @@ async def test_terminate_draining_reviewer_after_terminal_verdict(ctx: MockConte
         claim_generation=claim["claim_generation"],
         ctx=ctx,
     )
+    cursor = await ctx.lifespan_context.db.execute("SELECT status FROM reviewers WHERE id='r-a'")
+    row = await cursor.fetchone()
+    assert row["status"] == "draining"
+
+    await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
     cursor = await ctx.lifespan_context.db.execute("SELECT status FROM reviewers WHERE id='r-a'")
     row = await cursor.fetchone()
     assert row["status"] == "terminated"
@@ -402,6 +549,10 @@ async def test_terminal_verdict_terminates_live_draining_process(
         ctx=ctx,
     )
 
+    assert proc.terminated is False
+    assert spawned["reviewer_id"] in pool._processes
+
+    await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
     assert proc.terminated is True
     assert spawned["reviewer_id"] not in pool._processes
 

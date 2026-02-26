@@ -18,7 +18,7 @@ Display the complete GSD command reference. Output ONLY the reference content. D
 GSD evolves fast. Update periodically:
 
 ```bash
-npx get-shit-done-cc@latest
+npx get-shit-done-tandem@latest
 ```
 
 ## Core Workflow
@@ -110,6 +110,16 @@ Execute all plans in a phase.
 - Updates REQUIREMENTS.md, ROADMAP.md, STATE.md
 
 Usage: `/gsd:execute-phase 5`
+
+**`/gsd:tandem-review [description]`**
+Submit current local diff to gsdreview and run the proposer lifecycle to closure.
+
+- Captures your current diff and review description
+- Identifies as `proposer-{project}` for broker lifecycle calls
+- Long-polls reviewer verdicts and handles revision loops on the same review
+- Uses discussion messages for clarifications and closes review on approval
+
+Usage: `/gsd:tandem-review "Refactor auth middleware and add regression tests"`
 
 ### Quick Mode
 
@@ -332,7 +342,7 @@ Update GSD to latest version with changelog preview.
 - Displays changelog entries for versions you've missed
 - Highlights breaking changes
 - Confirms before running install
-- Better than raw `npx get-shit-done-cc`
+- Better than raw `npx get-shit-done-tandem`
 
 Usage: `/gsd:update`
 

@@ -28,6 +28,8 @@ Parse current values (default to `true` if not present):
 - `workflow.research` — spawn researcher during plan-phase
 - `workflow.plan_check` — spawn plan checker during plan-phase
 - `workflow.verifier` — spawn verifier during execute-phase
+- `review.enabled` — enforce broker review gates before progression
+- `review.fail_mode` — closed (block) vs open (warn-only)
 - `model_profile` — which model each agent uses (default: `balanced`)
 - `git.branching_strategy` — branching approach (default: `"none"`)
 </step>
@@ -84,6 +86,15 @@ AskUserQuestion([
     ]
   },
   {
+    question: "Require broker review gates for discuss/plan/execute/verify?",
+    header: "Review",
+    multiSelect: false,
+    options: [
+      { label: "Yes (Recommended)", description: "Fail-closed progression with review ledger enforcement" },
+      { label: "No", description: "Disable hard review gating" }
+    ]
+  },
+  {
     question: "Git branching strategy?",
     header: "Branching",
     multiSelect: false,
@@ -109,6 +120,17 @@ Merge new settings into existing config.json:
     "plan_check": true/false,
     "verifier": true/false,
     "auto_advance": true/false
+  },
+  "review": {
+    "enabled": true/false,
+    "fail_mode": "closed",
+    "allow_override": false,
+    "required_gates": {
+      "discuss": true/false,
+      "plan": true/false,
+      "execute": true/false,
+      "verify": true/false
+    }
   },
   "git": {
     "branching_strategy": "none" | "phase" | "milestone"
@@ -156,6 +178,17 @@ Write `~/.gsd/defaults.json` with:
     "plan_check": <current>,
     "verifier": <current>,
     "auto_advance": <current>
+  },
+  "review": {
+    "enabled": <current>,
+    "fail_mode": "closed",
+    "allow_override": <current>,
+    "required_gates": {
+      "discuss": <current>,
+      "plan": <current>,
+      "execute": <current>,
+      "verify": <current>
+    }
   }
 }
 ```
@@ -176,6 +209,7 @@ Display:
 | Plan Checker         | {On/Off} |
 | Execution Verifier   | {On/Off} |
 | Auto-Advance         | {On/Off} |
+| Review Gates         | {Fail-Closed On/Off} |
 | Git Branching        | {None/Per Phase/Per Milestone} |
 | Saved as Defaults    | {Yes/No} |
 
@@ -193,8 +227,8 @@ Quick commands:
 
 <success_criteria>
 - [ ] Current config read
-- [ ] User presented with 6 settings (profile + 4 workflow toggles + git branching)
-- [ ] Config updated with model_profile, workflow, and git sections
+- [ ] User presented with 7 settings (profile + 4 workflow toggles + review + git branching)
+- [ ] Config updated with model_profile, workflow, review, and git sections
 - [ ] User offered to save as global defaults (~/.gsd/defaults.json)
 - [ ] Changes confirmed to user
 </success_criteria>

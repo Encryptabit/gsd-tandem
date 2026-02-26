@@ -126,7 +126,7 @@ class TestAddMessage:
         await submit_verdict.fn(
             review_id=review_id, verdict="approved", ctx=ctx
         )
-        await close_review.fn(review_id=review_id, ctx=ctx)
+        await close_review.fn(review_id=review_id, closer_role="proposer", ctx=ctx)
         msg_result = await add_message.fn(
             review_id=review_id, sender_role="reviewer", body="Late feedback", ctx=ctx
         )
@@ -155,6 +155,100 @@ class TestAddMessage:
             review_id=review_id,
             sender_role="proposer",
             body="What should I fix?",
+            ctx=ctx,
+        )
+        assert "message_id" in result
+
+    async def test_proposer_message_requeues_changes_requested_to_pending(
+        self, ctx: MockContext
+    ) -> None:
+        """Proposer follow-up re-queues review so reviewer loop can reclaim it."""
+        review_id = await _create_and_claim(ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Needs work",
+            ctx=ctx,
+        )
+        result = await add_message.fn(
+            review_id=review_id,
+            sender_role="proposer",
+            body="Can you clarify the exact blocker?",
+            ctx=ctx,
+        )
+        assert "message_id" in result
+
+        cursor = await ctx.lifespan_context.db.execute(
+            "SELECT status, claimed_by, claimed_at FROM reviews WHERE id = ?",
+            (review_id,),
+        )
+        row = await cursor.fetchone()
+        assert row["status"] == "pending"
+        assert row["claimed_by"] is None
+        assert row["claimed_at"] is None
+
+    async def test_requeue_reserves_active_reviewer_for_context_reuse(
+        self, ctx: MockContext
+    ) -> None:
+        """Active reviewer ownership is preserved across proposer follow-up requeue."""
+        review_id = await _create_and_claim(ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="changes_requested",
+            reason="Needs work",
+            ctx=ctx,
+        )
+        await ctx.lifespan_context.db.execute(
+            """INSERT INTO reviewers (id, display_name, session_token, status)
+               VALUES ('reviewer-1', 'reviewer-1', 'session-a', 'active')"""
+        )
+        await ctx.lifespan_context.db.execute(
+            """INSERT INTO reviewers (id, display_name, session_token, status)
+               VALUES ('reviewer-2', 'reviewer-2', 'session-a', 'active')"""
+        )
+        await add_message.fn(
+            review_id=review_id,
+            sender_role="proposer",
+            body="Clarification request",
+            ctx=ctx,
+        )
+
+        cursor = await ctx.lifespan_context.db.execute(
+            "SELECT status, claimed_by FROM reviews WHERE id = ?",
+            (review_id,),
+        )
+        row = await cursor.fetchone()
+        assert row["status"] == "pending"
+        assert row["claimed_by"] == "reviewer-1"
+
+        wrong_reviewer = await claim_review.fn(
+            review_id=review_id,
+            reviewer_id="reviewer-2",
+            ctx=ctx,
+        )
+        assert "error" in wrong_reviewer
+        assert "reserved for reviewer reviewer-1" in wrong_reviewer["error"]
+
+        right_reviewer = await claim_review.fn(
+            review_id=review_id,
+            reviewer_id="reviewer-1",
+            ctx=ctx,
+        )
+        assert right_reviewer["status"] == "claimed"
+
+    async def test_message_on_approved_accepted(self, ctx: MockContext) -> None:
+        """Messages are accepted in approved state until proposer closes."""
+        review_id = await _create_and_claim(ctx)
+        await submit_verdict.fn(
+            review_id=review_id,
+            verdict="approved",
+            reason="LGTM",
+            ctx=ctx,
+        )
+        result = await add_message.fn(
+            review_id=review_id,
+            sender_role="proposer",
+            body="Thanks for the review, closing next",
             ctx=ctx,
         )
         assert "message_id" in result

@@ -20,8 +20,29 @@ def detect_platform() -> str:
     return "windows" if os.name == "nt" else "native"
 
 
+def _workspace_path_for_spawn(workspace_path: str) -> str:
+    """Normalize workspace path for the target reviewer execution environment.
+
+    Reviewer workers on Windows are launched inside WSL (`bash -lc`), so Windows
+    drive-letter paths must be translated to `/mnt/<drive>/...`.
+    """
+    if detect_platform() != "windows":
+        return workspace_path
+    if workspace_path.startswith("/"):
+        return workspace_path
+
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", workspace_path)
+    if match is None:
+        return workspace_path
+
+    drive = match.group(1).lower()
+    rest = match.group(2).replace("\\", "/")
+    return f"/mnt/{drive}/{rest}"
+
+
 def build_codex_argv(config: SpawnConfig) -> list[str]:
     """Build shell-free argv for reviewer subprocess invocation."""
+    workspace_for_spawn = _workspace_path_for_spawn(config.workspace_path)
     codex_args = [
         "codex",
         "exec",
@@ -33,7 +54,7 @@ def build_codex_argv(config: SpawnConfig) -> list[str]:
         "-c",
         f"model_reasoning_effort={config.reasoning_effort}",
         "-C",
-        config.workspace_path,
+        workspace_for_spawn,
         "-",
     ]
     if detect_platform() == "windows":

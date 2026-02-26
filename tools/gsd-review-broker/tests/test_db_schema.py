@@ -298,3 +298,16 @@ def test_resolve_db_path_uses_home_config_fallback(monkeypatch) -> None:
 
     path = db_module.resolve_db_path(repo_root=None)
     assert path == Path("/home/tester/.config/gsd-review-broker/codex_review_broker.sqlite3")
+
+
+def test_repo_config_path_uses_repo_root_by_default(monkeypatch) -> None:
+    monkeypatch.delenv(db_module.CONFIG_PATH_ENV_VAR, raising=False)
+    path = db_module._repo_config_path("/tmp/repo")
+    assert path == Path("/tmp/repo/.planning/config.json")
+
+
+def test_repo_config_path_honors_env_override(monkeypatch) -> None:
+    custom_config = "~/broker/custom-config.json"
+    monkeypatch.setenv(db_module.CONFIG_PATH_ENV_VAR, custom_config)
+    path = db_module._repo_config_path("/ignored/repo")
+    assert path == Path(custom_config).expanduser()

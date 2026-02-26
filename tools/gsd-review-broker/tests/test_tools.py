@@ -359,10 +359,10 @@ class TestCloseReview:
             reviewer_id="reviewer-1",
             ctx=ctx,
         )
-        result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
+        result = await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
         assert result["status"] == "closed"
 
-    async def test_close_review_after_changes_requested(self, ctx: MockContext) -> None:
+    async def test_close_review_after_changes_requested_fails(self, ctx: MockContext) -> None:
         created = await _create_review(ctx)
         await claim_review.fn(
             review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
@@ -374,17 +374,35 @@ class TestCloseReview:
             reviewer_id="reviewer-1",
             ctx=ctx,
         )
-        result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
-        assert result["status"] == "closed"
+        result = await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
+        assert "error" in result
+        assert "Invalid transition" in result["error"]
+
+    async def test_close_review_reviewer_role_rejected(self, ctx: MockContext) -> None:
+        created = await _create_review(ctx)
+        await claim_review.fn(
+            review_id=created["review_id"], reviewer_id="reviewer-1", ctx=ctx
+        )
+        await submit_verdict.fn(
+            review_id=created["review_id"],
+            verdict="approved",
+            reviewer_id="reviewer-1",
+            ctx=ctx,
+        )
+        result = await close_review.fn(
+            review_id=created["review_id"], closer_role="reviewer", ctx=ctx
+        )
+        assert "error" in result
+        assert "Only proposer may close" in result["error"]
 
     async def test_close_review_from_pending_fails(self, ctx: MockContext) -> None:
         created = await _create_review(ctx)
-        result = await close_review.fn(review_id=created["review_id"], ctx=ctx)
+        result = await close_review.fn(review_id=created["review_id"], closer_role="proposer", ctx=ctx)
         assert "error" in result
         assert "Invalid transition" in result["error"]
 
     async def test_close_review_not_found(self, ctx: MockContext) -> None:
-        result = await close_review.fn(review_id="nonexistent-id", ctx=ctx)
+        result = await close_review.fn(review_id="nonexistent-id", closer_role="proposer", ctx=ctx)
         assert "error" in result
         assert "not found" in result["error"]
 
@@ -424,7 +442,7 @@ class TestFullLifecycle:
         assert verdict["verdict_reason"] == "Implementation looks correct"
 
         # Step 5: Close it
-        closed = await close_review.fn(review_id=review_id, ctx=ctx)
+        closed = await close_review.fn(review_id=review_id, closer_role="proposer", ctx=ctx)
         assert closed["status"] == "closed"
 
         # Verify final DB state

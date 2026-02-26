@@ -7,6 +7,33 @@
     "verifier": true,
     "auto_advance": false
   },
+  "review": {
+    "enabled": true,
+    "fail_mode": "closed",
+    "allow_override": false,
+    "required_gates": {
+      "discuss": true,
+      "plan": true,
+      "execute": true,
+      "verify": true
+    }
+  },
+  "review_granularity": "per_task",
+  "execution_mode": "blocking",
+  "reviewer_pool": {
+    "workspace_path": "auto",
+    "model": "gpt-5.3-codex",
+    "reasoning_effort": "high",
+    "wsl_distro": "Ubuntu",
+    "max_pool_size": 3,
+    "scaling_ratio": 3.0,
+    "idle_timeout_seconds": 300.0,
+    "max_ttl_seconds": 3600.0,
+    "claim_timeout_seconds": 1200.0,
+    "spawn_cooldown_seconds": 10.0,
+    "prompt_template_path": "reviewer_prompt.md",
+    "background_check_interval_seconds": 30.0
+  },
   "planning": {
     "commit_docs": true,
     "search_gitignored": false

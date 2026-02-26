@@ -14,7 +14,7 @@ VALID_TRANSITIONS: dict[ReviewStatus, set[ReviewStatus]] = {
     },
     ReviewStatus.IN_REVIEW: {ReviewStatus.APPROVED, ReviewStatus.CHANGES_REQUESTED},
     ReviewStatus.APPROVED: {ReviewStatus.CLOSED},
-    ReviewStatus.CHANGES_REQUESTED: {ReviewStatus.CLOSED, ReviewStatus.PENDING},  # resubmit
+    ReviewStatus.CHANGES_REQUESTED: {ReviewStatus.PENDING},  # resubmit
     ReviewStatus.CLOSED: set(),  # terminal
 }
 
