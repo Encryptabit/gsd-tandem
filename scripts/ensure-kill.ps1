@@ -61,9 +61,9 @@ function Get-ListeningPids {
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
         foreach ($listener in $listeners) {
             if ($null -eq $listener) { continue }
-            $pid = [int]$listener.OwningProcess
-            if ($pid -gt 0) {
-                [void]$ids.Add($pid)
+            $owningPid = [int]$listener.OwningProcess
+            if ($owningPid -gt 0) {
+                [void]$ids.Add($owningPid)
             }
         }
     }
@@ -120,8 +120,8 @@ foreach ($proc in $matchedProcesses) {
 }
 
 $listenerPids = @(Get-ListeningPids -LocalPorts $Ports | Where-Object { $_ -ne $PID })
-foreach ($pid in $listenerPids) {
-    [void]$targetRootIds.Add([int]$pid)
+foreach ($listenerPid in $listenerPids) {
+    [void]$targetRootIds.Add([int]$listenerPid)
 }
 
 if ($targetRootIds.Count -eq 0) {
@@ -131,8 +131,8 @@ if ($targetRootIds.Count -eq 0) {
 
 Write-Log ("Found {0} broker process root(s): {1}" -f $targetRootIds.Count, (($targetRootIds | Sort-Object) -join ", "))
 
-foreach ($pid in ($targetRootIds | Sort-Object -Descending)) {
-    [void](Stop-ProcessTreeByPid -PidToStop $pid -Reason "root target")
+foreach ($targetPid in ($targetRootIds | Sort-Object -Descending)) {
+    [void](Stop-ProcessTreeByPid -PidToStop $targetPid -Reason "root target")
 }
 
 # Secondary sweep for leftovers that may not have been part of a clean tree.

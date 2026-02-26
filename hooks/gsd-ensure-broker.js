@@ -86,14 +86,72 @@ function resolveWorkspaceSeedContext(startDir) {
     if (!cfg.review || typeof cfg.review !== 'object') continue;
     if (cfg.review.enabled === false) continue;
     if (!cfg.reviewer_pool || typeof cfg.reviewer_pool !== 'object') continue;
+    const workspaceConfigPath = ensureWorkspaceDefaultConfig(workspaceRoot, configPath);
+    if (!workspaceConfigPath) continue;
     return {
       config: cfg,
-      configPath,
+      configPath: workspaceConfigPath,
       projectRoot: workspaceRoot,
     };
   }
 
   return null;
+}
+
+function resolveBrokerUserConfigDir() {
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+  if (xdgConfigHome) return path.join(path.resolve(xdgConfigHome), 'gsd-review-broker');
+
+  if (process.platform === 'win32') {
+    if (process.env.APPDATA) return path.join(path.resolve(process.env.APPDATA), 'gsd-review-broker');
+    return path.join(os.homedir(), 'AppData', 'Roaming', 'gsd-review-broker');
+  }
+
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'gsd-review-broker');
+  }
+
+  return path.join(os.homedir(), '.config', 'gsd-review-broker');
+}
+
+function copyObject(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(input)) out[key] = value;
+  return out;
+}
+
+function ensureWorkspaceDefaultConfig(workspaceRoot, seedConfigPath) {
+  try {
+    const configDir = resolveBrokerUserConfigDir();
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'workspace-default-config.json');
+
+    const seed = safeJson(seedConfigPath);
+    const existing = safeJson(configPath);
+    let reviewerPool = {};
+    if (seed && typeof seed === 'object' && seed.reviewer_pool && typeof seed.reviewer_pool === 'object') {
+      reviewerPool = copyObject(seed.reviewer_pool);
+    } else if (
+      existing &&
+      typeof existing === 'object' &&
+      existing.reviewer_pool &&
+      typeof existing.reviewer_pool === 'object'
+    ) {
+      reviewerPool = copyObject(existing.reviewer_pool);
+    }
+
+    reviewerPool.workspace_path = workspaceRoot;
+    if (!reviewerPool.prompt_template_path) {
+      reviewerPool.prompt_template_path = 'reviewer_prompt.md';
+    }
+
+    const payload = { reviewer_pool: reviewerPool };
+    fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), 'utf8');
+    return configPath;
+  } catch {
+    return null;
+  }
 }
 
 function canRunUv() {

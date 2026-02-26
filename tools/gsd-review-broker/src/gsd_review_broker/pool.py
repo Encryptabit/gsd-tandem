@@ -156,6 +156,7 @@ class ReviewerPool:
 
     session_token: str
     config: SpawnConfig
+    repo_root: str | None = None
     _counter: int = 0
     _processes: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
     _draining: set[str] = field(default_factory=set)
@@ -207,13 +208,15 @@ class ReviewerPool:
 
         Resolution order:
         1) Absolute project path (if provided and exists)
-        2) `workspace_path/<project>` direct child match
-        3) Case-insensitive child directory match
-        4) Slug-normalized child directory match (e.g. code2obsidian -> Code2Obsidian)
-        5) Sibling match when workspace_path appears to be a single repo root
-        6) Base workspace_path fallback
+        2) `<repo_root>/<project>` child match (when repo_root is available)
+        3) `workspace_path/<project>` direct child match
+        4) Case-insensitive child directory match
+        5) Slug-normalized child directory match (e.g. code2obsidian -> Code2Obsidian)
+        6) Sibling match when workspace_path appears to be a single repo root
+        7) Base workspace_path fallback
         """
         base = Path(self.config.workspace_path).expanduser()
+        repo_root = Path(self.repo_root).expanduser() if self.repo_root else None
         if project is None or project.strip() == "":
             return str(base)
 
@@ -221,6 +224,13 @@ class ReviewerPool:
         project_path = Path(token).expanduser()
         if _looks_like_absolute_path(token) and project_path.exists():
             return str(project_path)
+
+        if repo_root is not None:
+            in_repo_root = self._find_matching_project_dir(repo_root, token)
+            if in_repo_root is not None:
+                return str(in_repo_root)
+            if _normalize_project_key(repo_root.name) == _normalize_project_key(token):
+                return str(repo_root)
 
         in_base = self._find_matching_project_dir(base, token)
         if in_base is not None:
@@ -239,6 +249,28 @@ class ReviewerPool:
             return str(base)
 
         return str(base)
+
+    def _project_reviewer_pool_overrides(self, project: str | None) -> dict[str, object]:
+        """Load project-local reviewer_pool overrides from <workspace>/.planning/config.json."""
+        if project is None or project.strip() == "":
+            return {}
+        workspace = Path(self.resolve_workspace_path(project))
+        config_path = workspace / ".planning" / "config.json"
+        if not config_path.exists():
+            return {}
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "pool.project_overrides -> failed to parse %s: %s",
+                config_path,
+                exc,
+            )
+            return {}
+        section = payload.get("reviewer_pool")
+        if not isinstance(section, dict):
+            return {}
+        return section
 
     def project_scope_for(self, reviewer_id: str) -> str | None:
         return self._project_scopes.get(reviewer_id)
@@ -415,7 +447,22 @@ class ReviewerPool:
         reviewer_id = f"{display_name}-{self.session_token}"
         project_scope = project.strip() if project and project.strip() else None
         workspace_path = self.resolve_workspace_path(project_scope)
-        spawn_config = self.config.model_copy(update={"workspace_path": workspace_path})
+        merged = self.config.model_dump()
+        overrides = self._project_reviewer_pool_overrides(project_scope)
+        for key, value in overrides.items():
+            if key == "workspace_path":
+                continue
+            merged[key] = value
+        merged["workspace_path"] = workspace_path
+        try:
+            spawn_config = SpawnConfig.model_validate(merged)
+        except Exception as exc:
+            logger.warning(
+                "pool.spawn_reviewer -> invalid project overrides project=%s err=%s (using base config)",
+                project_scope or "(any)",
+                exc,
+            )
+            spawn_config = self.config.model_copy(update={"workspace_path": workspace_path})
         argv = build_codex_argv(spawn_config)
         prompt_path = self._resolve_prompt_template_path()
         prompt = load_prompt_template(prompt_path, reviewer_id)

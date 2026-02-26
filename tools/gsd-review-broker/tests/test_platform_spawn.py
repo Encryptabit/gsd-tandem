@@ -36,6 +36,7 @@ def test_build_codex_argv_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert "--sandbox" in argv
     assert "read-only" in argv
     assert "--ephemeral" in argv
+    assert "--skip-git-repo-check" in argv
 
 
 def test_build_codex_argv_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -46,6 +47,7 @@ def test_build_codex_argv_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert argv[:6] == ["wsl", "-d", "Ubuntu", "--", "bash", "-lc"]
     assert "nvm.sh" in argv[-1]
     assert "exec codex exec" in argv[-1]
+    assert "--skip-git-repo-check" in argv[-1]
 
 
 def test_build_codex_argv_windows_translates_drive_path(

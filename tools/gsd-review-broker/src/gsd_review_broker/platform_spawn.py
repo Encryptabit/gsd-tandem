@@ -49,6 +49,9 @@ def build_codex_argv(config: SpawnConfig) -> list[str]:
         "--sandbox",
         "read-only",
         "--ephemeral",
+        # Reviewer workspace roots can be multi-project directories without .git.
+        # Allow execution there and rely on explicit project scoping in broker tools.
+        "--skip-git-repo-check",
         "--model",
         config.model,
         "-c",

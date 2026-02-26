@@ -608,6 +608,7 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             pool = ReviewerPool(
                 session_token=secrets.token_hex(4),
                 config=spawn_config,
+                repo_root=repo_root,
             )
 
     ctx = AppContext(db=db, repo_root=repo_root, pool=pool)
