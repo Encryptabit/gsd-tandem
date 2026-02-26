@@ -171,8 +171,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Dashboard route handlers, HTML/CSS/JS shell with design system, SSE connection endpoint
-- [ ] 08-02-PLAN.md -- Dashboard route tests and visual human verification
+- [ ] 08-01-PLAN.md -- Astro project setup, design system, layout shell with sidebar navigation, theme toggle, SSE utility, build to dist/
+- [ ] 08-02-PLAN.md -- Python dashboard module (static file serving, SSE endpoint), server.py integration, route tests
 
 **Note**: DASH-02 (frontend-design skill) is a cross-cutting process requirement applied during all dashboard phases, not a standalone deliverable. It is assigned here as its home phase but its quality standard applies to phases 9-12 as well.
 
