@@ -612,6 +612,10 @@ async def broker_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             )
 
     ctx = AppContext(db=db, repo_root=repo_root, pool=pool)
+
+    from gsd_review_broker.dashboard import set_app_context
+    set_app_context(ctx)
+
     background_task: asyncio.Task | None = None
     if pool is not None:
         stale_terminated = await _startup_terminate_stale_reviewers(ctx)
