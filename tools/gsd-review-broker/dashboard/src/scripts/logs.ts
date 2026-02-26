@@ -1,10 +1,404 @@
 /**
- * Log viewer tab data script (stub for initial build).
- * Full implementation in Task 2.
+ * Log viewer tab data fetching, rendering, SSE tail, search filtering.
+ * Fetches log file list from /dashboard/api/logs, loads file contents,
+ * renders terminal-style entries, and subscribes to SSE for live tail.
  */
 
-function init(): void {
-  // Stub - full implementation in Task 2
+interface LogFile {
+  name: string;
+  size: number;
+  modified: string;
+  source: 'broker' | 'reviewer';
+}
+
+interface LogEntry {
+  ts?: string;
+  level?: string;
+  event?: string;
+  message?: string;
+  reviewer_id?: string;
+  caller_tag?: string;
+  session_token?: string;
+  stream?: string;
+  pid?: number;
+  exit_code?: number;
+  exception?: string;
+  [key: string]: unknown;
+}
+
+// State
+let currentFile: string | null = null;
+let allEntries: LogEntry[] = [];
+let tailActive: boolean = true;
+let searchQuery: string = '';
+let autoScroll: boolean = true;
+let tailEventSource: EventSource | null = null;
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return h + ':' + m + ':' + s + '.' + ms;
+  } catch {
+    return iso || '--';
+  }
+}
+
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mon = months[d.getMonth()];
+    const day = d.getDate();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return mon + ' ' + day + ', ' + hh + ':' + mm;
+  } catch {
+    return iso || '--';
+  }
+}
+
+function determineLevel(entry: LogEntry): string {
+  if (entry.level) return entry.level.toLowerCase();
+  // Infer from reviewer log events
+  if (entry.event === 'reviewer_exit' && entry.exit_code !== undefined && entry.exit_code !== 0) {
+    return 'error';
+  }
+  if (entry.event === 'stderr_line' || entry.stream === 'stderr') {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function getTag(entry: LogEntry): string {
+  if (entry.caller_tag) return entry.caller_tag;
+  if (entry.reviewer_id) return entry.reviewer_id;
+  if (entry.event) return entry.event;
+  return '';
+}
+
+function matchesSearch(entry: LogEntry, query: string): boolean {
+  if (!query) return true;
+  const lowerQuery = query.toLowerCase();
+  const jsonStr = JSON.stringify(entry).toLowerCase();
+  return jsonStr.indexOf(lowerQuery) !== -1;
+}
+
+function createEntryElement(entry: LogEntry): HTMLDivElement {
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+
+  const level = determineLevel(entry);
+  div.classList.add('log-level-' + level);
+
+  const tag = getTag(entry);
+  const ts = entry.ts ? formatTimestamp(entry.ts) : '--:--:--.---';
+  const msg = entry.message || '';
+
+  let headerHtml = '<span class="log-entry-ts">[' + escapeHtml(ts) + ']</span>';
+  if (tag) {
+    headerHtml += ' <span class="log-entry-tag">[' + escapeHtml(tag) + ']</span>';
+  }
+  if (msg) {
+    headerHtml += ' <span class="log-entry-message">' + escapeHtml(msg) + '</span>';
+  }
+
+  const jsonStr = JSON.stringify(entry, null, 2);
+  const jsonHtml = '<pre class="log-entry-json">' + escapeHtml(jsonStr) + '</pre>';
+
+  div.innerHTML = headerHtml + jsonHtml;
+  return div;
+}
+
+async function fetchFileList(): Promise<LogFile[]> {
+  const resp = await fetch('/dashboard/api/logs');
+  if (!resp.ok) {
+    throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+  }
+  const data = await resp.json();
+  return data.files || [];
+}
+
+function populateDropdown(files: LogFile[]): void {
+  const select = document.getElementById('log-file-select') as HTMLSelectElement | null;
+  if (!select) return;
+
+  // Remove all options except the first disabled one
+  while (select.options.length > 1) {
+    select.remove(1);
+  }
+
+  if (files.length === 0) {
+    const noFiles = document.createElement('option');
+    noFiles.value = '';
+    noFiles.disabled = true;
+    noFiles.textContent = 'No log files found';
+    select.appendChild(noFiles);
+    return;
+  }
+
+  const brokerFiles = files.filter(function(f) { return f.source === 'broker'; });
+  const reviewerFiles = files.filter(function(f) { return f.source === 'reviewer'; });
+
+  if (brokerFiles.length > 0) {
+    const brokerGroup = document.createElement('optgroup');
+    brokerGroup.label = 'Broker Logs';
+    for (let i = 0; i < brokerFiles.length; i++) {
+      const f = brokerFiles[i];
+      const opt = document.createElement('option');
+      opt.value = f.name;
+      opt.textContent = f.name + ' (' + formatSize(f.size) + ', ' + formatDate(f.modified) + ')';
+      brokerGroup.appendChild(opt);
+    }
+    select.appendChild(brokerGroup);
+  }
+
+  if (reviewerFiles.length > 0) {
+    const reviewerGroup = document.createElement('optgroup');
+    reviewerGroup.label = 'Reviewer Logs';
+    for (let j = 0; j < reviewerFiles.length; j++) {
+      const rf = reviewerFiles[j];
+      const ropt = document.createElement('option');
+      ropt.value = rf.name;
+      ropt.textContent = rf.name + ' (' + formatSize(rf.size) + ', ' + formatDate(rf.modified) + ')';
+      reviewerGroup.appendChild(ropt);
+    }
+    select.appendChild(reviewerGroup);
+  }
+
+  // Auto-select first file (most recent since API returns sorted by mtime desc)
+  const firstOption = select.querySelector('optgroup option') as HTMLOptionElement | null;
+  if (firstOption) {
+    select.value = firstOption.value;
+  }
+}
+
+function renderEntries(): void {
+  const output = document.getElementById('log-output');
+  if (!output) return;
+  output.innerHTML = '';
+
+  const filtered = allEntries.filter(function(e) {
+    return matchesSearch(e, searchQuery);
+  });
+
+  if (filtered.length === 0 && allEntries.length > 0) {
+    output.innerHTML = '<div style="text-align:center;color:var(--color-text-secondary);padding:20px;">No entries match the search filter.</div>';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i < filtered.length; i++) {
+    fragment.appendChild(createEntryElement(filtered[i]));
+  }
+  output.appendChild(fragment);
+
+  if (autoScroll) {
+    output.scrollTop = output.scrollHeight;
+  }
+}
+
+async function loadFile(filename: string): Promise<void> {
+  const output = document.getElementById('log-output');
+  const empty = document.getElementById('log-empty');
+  const loading = document.getElementById('log-loading');
+
+  if (loading) loading.style.display = '';
+  if (output) output.style.display = 'none';
+  if (empty) empty.style.display = 'none';
+
+  // Stop any existing tail
+  stopTail();
+  currentFile = filename;
+  allEntries = [];
+
+  try {
+    const resp = await fetch('/dashboard/api/logs/' + encodeURIComponent(filename));
+    if (!resp.ok) {
+      throw new Error('HTTP ' + resp.status);
+    }
+    const data = await resp.json();
+    allEntries = data.entries || [];
+  } catch {
+    allEntries = [];
+    if (output) {
+      output.innerHTML = '<div style="text-align:center;color:var(--color-error);padding:20px;">Failed to load log file.</div>';
+    }
+  }
+
+  if (loading) loading.style.display = 'none';
+  if (output) output.style.display = '';
+
+  renderEntries();
+
+  if (output) {
+    output.scrollTop = output.scrollHeight;
+  }
+
+  // Start tail if enabled
+  if (tailActive && currentFile) {
+    startTail(currentFile);
+  }
+}
+
+function startTail(filename: string): void {
+  stopTail();
+
+  const dot = document.getElementById('log-tail-dot');
+  if (dot) {
+    dot.className = 'tail-dot tail-dot-active';
+  }
+
+  try {
+    tailEventSource = new EventSource('/dashboard/events?tail=' + encodeURIComponent(filename));
+
+    tailEventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'log_tail' && Array.isArray(data.entries)) {
+          const logOutput = document.getElementById('log-output');
+          if (!logOutput) return;
+
+          for (let i = 0; i < data.entries.length; i++) {
+            const entry = data.entries[i] as LogEntry;
+            allEntries.push(entry);
+
+            if (matchesSearch(entry, searchQuery)) {
+              logOutput.appendChild(createEntryElement(entry));
+            }
+          }
+
+          if (autoScroll && logOutput) {
+            logOutput.scrollTop = logOutput.scrollHeight;
+          }
+        }
+      } catch {
+        // Ignore non-JSON or malformed messages
+      }
+    };
+
+    tailEventSource.onerror = function() {
+      if (dot) {
+        dot.className = 'tail-dot tail-dot-idle';
+      }
+    };
+
+    tailEventSource.onopen = function() {
+      if (dot) {
+        dot.className = 'tail-dot tail-dot-active';
+      }
+    };
+  } catch {
+    if (dot) {
+      dot.className = 'tail-dot tail-dot-idle';
+    }
+  }
+}
+
+function stopTail(): void {
+  if (tailEventSource) {
+    tailEventSource.close();
+    tailEventSource = null;
+  }
+  const dot = document.getElementById('log-tail-dot');
+  if (dot) {
+    dot.className = 'tail-dot tail-dot-idle';
+  }
+}
+
+function handleTailToggle(): void {
+  tailActive = !tailActive;
+  const dot = document.getElementById('log-tail-dot');
+  const label = document.getElementById('log-tail-label');
+
+  if (tailActive) {
+    if (label) label.textContent = 'Live Tail';
+    if (currentFile) {
+      startTail(currentFile);
+    }
+  } else {
+    stopTail();
+    if (dot) {
+      dot.className = 'tail-dot tail-dot-paused';
+    }
+    if (label) label.textContent = 'Tail Paused';
+  }
+}
+
+function handleSearch(): void {
+  const input = document.getElementById('log-search') as HTMLInputElement | null;
+  if (!input) return;
+  searchQuery = input.value;
+  renderEntries();
+}
+
+function handleScroll(): void {
+  const logOutput = document.getElementById('log-output');
+  if (!logOutput) return;
+  const distanceFromBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight;
+  autoScroll = distanceFromBottom < 50;
+}
+
+async function init(): Promise<void> {
+  try {
+    const files = await fetchFileList();
+    populateDropdown(files);
+
+    // Auto-load first file if available
+    const select = document.getElementById('log-file-select') as HTMLSelectElement | null;
+    if (select && select.value && select.value !== '') {
+      loadFile(select.value);
+    }
+  } catch {
+    const empty = document.getElementById('log-empty');
+    if (empty) {
+      const p = empty.querySelector('p');
+      if (p) p.textContent = 'Unable to load log files.';
+    }
+  }
+
+  // Attach event listeners
+  const selectEl = document.getElementById('log-file-select');
+  if (selectEl) {
+    selectEl.addEventListener('change', function() {
+      const s = selectEl as HTMLSelectElement;
+      if (s.value) loadFile(s.value);
+    });
+  }
+
+  const toggleBtn = document.getElementById('log-tail-toggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', handleTailToggle);
+  }
+
+  const searchInput = document.getElementById('log-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(handleSearch, 200);
+    });
+  }
+
+  const outputEl = document.getElementById('log-output');
+  if (outputEl) {
+    outputEl.addEventListener('scroll', handleScroll);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
