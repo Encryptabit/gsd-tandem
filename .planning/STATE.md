@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: 8 of 12 (Dashboard Shell and Infrastructure)
-Plan: 2 of 2 complete
-Status: Phase 8 complete — Ready for Phase 9 (Overview tab)
-Last activity: 2026-02-26 — Completed 08-02-PLAN.md (Python static serving + SSE endpoint)
+Phase: 9 of 12 (Overview Tab)
+Plan: 1 of 2 complete
+Status: Executing Phase 9 — Plan 1 complete (Overview backend API + SSE)
+Last activity: 2026-02-26 — Completed 09-01-PLAN.md (Overview JSON API + SSE data push)
 
-Progress: [======================..........] 67% (v1.0 complete, v1.1 phase 8 done, phase 9 next)
+Progress: [========================........] 75% (v1.0 complete, v1.1 phase 9 plan 1 of 2 done)
 
 ## Performance Metrics
 
@@ -27,6 +27,7 @@ Progress: [======================..........] 67% (v1.0 complete, v1.1 phase 8 do
 - Previous 08-01 and 08-02 implementations scrapped (inline HTML approach abandoned)
 - 08-01 (Astro shell): 5 min, 2 tasks, 16 files
 - 08-02 (static serving + SSE): 10 min, 2 tasks, 3 files
+- 09-01 (overview backend API + SSE): 8 min, 2 tasks, 3 files
 
 ## Accumulated Context
 
@@ -46,6 +47,9 @@ v1.1 decisions:
 - Direct async generator for SSE heartbeat (no sse-starlette wrapper needed)
 - Route registration order: /dashboard/events before catch-all to prevent interception
 - Direct handler testing for SSE endpoints (bypasses TestClient stream buffering)
+- Module-level _app_ctx setter pattern for dashboard AppContext access (called from broker_lifespan)
+- SSE overview_update uses default message format (data: with type field) to match sse.ts onmessage dispatch
+- Dashboard query helpers duplicate tools.py SQL to avoid MCP Context dependency
 
 Key v1.0 decisions carried forward:
 
@@ -76,5 +80,5 @@ Key v1.0 decisions carried forward:
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Phase 9 context gathered
-Resume notes: Phase 9 context captured (09-CONTEXT.md). Plan Phase 9 next (Overview tab with status, stats, active reviewers).
+Stopped at: Completed 09-01-PLAN.md
+Resume notes: Phase 9 plan 1 complete (overview backend). Plan 2 next (Astro frontend components for overview tab).
