@@ -90,8 +90,18 @@
       "artifact_hash": "497dfc3b109a0cd05f3120e0a17da48d860028cb181b5d119b29af4894d18c4c",
       "note": null,
       "recorded_at": "2026-02-26T20:46:35.525Z"
+    },
+    {
+      "entry_id": "1772162420225-1l09ac",
+      "gate": "discuss",
+      "phase": "11",
+      "review_id": null,
+      "status": "skipped",
+      "artifact_hash": "850cb0fb6ab8d783c279a42bfeec4de76d69ce670a620ba81faae5cc894a57c5",
+      "note": "user_requested_pause",
+      "recorded_at": "2026-02-27T03:20:20.225Z"
     }
   ],
   "overrides": [],
-  "updated_at": "2026-02-26T20:46:35.525Z"
+  "updated_at": "2026-02-27T03:20:20.225Z"
 }
