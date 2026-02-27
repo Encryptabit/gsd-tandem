@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 8: Dashboard Shell and Infrastructure** - HTTP route, HTML scaffold, tab navigation, static asset serving embedded in broker (completed 2026-02-26)
 - [x] **Phase 9: Overview Tab** - Broker status, configuration, aggregate review stats, active reviewer list (completed 2026-02-26)
-- [x] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail (completed 2026-02-26)
+- [x] **Phase 10: Log Viewer Tab** - JSONL log file browser and real-time streaming tail (completed 2026-02-26)
 - [ ] **Phase 11: Review Browser Tab** - Review list with filtering, detail view with diffs and verdicts, discussion threads
 - [ ] **Phase 12: Pool Management Tab** - Reviewer subprocess status display and aggregate token usage tracking
 
@@ -213,7 +213,12 @@ Plans:
   2. User can click a review to see its detail view showing intent description, unified diff (rendered readably), verdict history, and metadata
   3. User can view the full discussion thread for any review, showing all messages in chronological order with sender identity and timestamps
   4. User can filter reviews by status (pending, approved, rejected, closed) and by category to find specific reviews quickly
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 11-01-PLAN.md -- Python API endpoints (review list, detail, discussion) with SSE review_update events and tests
+- [ ] 11-02-PLAN.md -- ReviewBrowser Astro component, SSE singleton store, reviews.ts list view with card rows, filtering, sorting
+- [ ] 11-03-PLAN.md -- Detail view rendering (overview/diff/discussion tabs), syntax-highlighted diff, discussion timeline, build to dist/
 
 ### Phase 12: Pool Management Tab
 **Goal**: User can monitor the reviewer pool health and understand token consumption across all reviewer subprocesses
@@ -242,5 +247,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 8. Dashboard Shell and Infrastructure | v1.1 | 2/2 | Complete | 2026-02-26 |
 | 9. Overview Tab | v1.1 | Complete    | 2026-02-26 | - |
 | 10. Log Viewer Tab | v1.1 | Complete    | 2026-02-26 | - |
-| 11. Review Browser Tab | v1.1 | 0/? | Not started | - |
+| 11. Review Browser Tab | v1.1 | 0/3 | Not started | - |
 | 12. Pool Management Tab | v1.1 | 0/? | Not started | - |
