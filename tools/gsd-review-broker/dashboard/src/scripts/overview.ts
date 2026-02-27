@@ -110,11 +110,13 @@ function renderStatus(broker: OverviewData['broker']): void {
     configGrid.innerHTML = '';
     const configEntries = Object.entries(broker.config);
     for (const [key, value] of configEntries) {
+      const label = key.replace(/_/g, ' ');
+      const display = value === null || value === undefined ? '--' : String(value);
       const item = document.createElement('div');
-      item.className = 'status-item';
+      item.className = 'config-item';
       item.innerHTML =
-        '<span class="status-key">' + escapeHtml(key) + '</span>' +
-        '<span class="status-value">' + escapeHtml(String(value)) + '</span>';
+        '<span class="config-key">' + escapeHtml(label) + '</span>' +
+        '<span class="config-value">' + escapeHtml(display) + '</span>';
       configGrid.appendChild(item);
     }
   }

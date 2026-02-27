@@ -35,6 +35,11 @@ let autoScroll: boolean = true;
 let tailEventSource: EventSource | null = null;
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let tailIdleTimer: ReturnType<typeof setTimeout> | null = null;
+let fileRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let lastFileListSignature: string = '';
+let fileListSyncInFlight: boolean = false;
+
+const FILE_LIST_REFRESH_INTERVAL_MS = 5000;
 
 function escapeHtml(text: string): string {
   const div = document.createElement('div');
@@ -120,10 +125,7 @@ function createEntryElement(entry: LogEntry): HTMLDivElement {
     headerHtml += ' <span class="log-entry-message">' + escapeHtml(msg) + '</span>';
   }
 
-  const jsonStr = JSON.stringify(entry, null, 2);
-  const jsonHtml = '<pre class="log-entry-json">' + escapeHtml(jsonStr) + '</pre>';
-
-  div.innerHTML = headerHtml + jsonHtml;
+  div.innerHTML = headerHtml;
   return div;
 }
 
@@ -136,22 +138,23 @@ async function fetchFileList(): Promise<LogFile[]> {
   return data.files || [];
 }
 
-function populateDropdown(files: LogFile[]): void {
+function populateDropdown(files: LogFile[], preferredFile: string | null): string | null {
   const select = document.getElementById('log-file-select') as HTMLSelectElement | null;
-  if (!select) return;
+  if (!select) return null;
 
-  // Remove all options except the first disabled one
-  while (select.options.length > 1) {
-    select.remove(1);
+  // Remove all children except the first placeholder option
+  while (select.children.length > 1) {
+    select.removeChild(select.lastChild!);
   }
 
   if (files.length === 0) {
     const noFiles = document.createElement('option');
     noFiles.value = '';
     noFiles.disabled = true;
+    noFiles.selected = true;
     noFiles.textContent = 'No log files found';
     select.appendChild(noFiles);
-    return;
+    return null;
   }
 
   const brokerFiles = files.filter(function(f) { return f.source === 'broker'; });
@@ -183,9 +186,56 @@ function populateDropdown(files: LogFile[]): void {
     select.appendChild(reviewerGroup);
   }
 
+  const hasPreferred = preferredFile
+    ? files.some(function(f) { return f.name === preferredFile; })
+    : false;
+
+  if (hasPreferred && preferredFile) {
+    select.value = preferredFile;
+    return preferredFile;
+  }
+
   // Auto-select most recent file (API returns sorted by mtime desc)
-  if (files.length > 0) {
-    select.value = files[0].name;
+  select.value = files[0].name;
+  return files[0].name;
+}
+
+function buildFileListSignature(files: LogFile[]): string {
+  if (files.length === 0) return 'empty';
+  return files
+    .map(function(f) {
+      return f.source + ':' + f.name + ':' + f.size + ':' + f.modified;
+    })
+    .join('|');
+}
+
+async function syncFileList(): Promise<void> {
+  if (fileListSyncInFlight) return;
+  fileListSyncInFlight = true;
+
+  try {
+    const files = await fetchFileList();
+    const signature = buildFileListSignature(files);
+    if (signature === lastFileListSignature) return;
+
+    const select = document.getElementById('log-file-select') as HTMLSelectElement | null;
+    const preferredFile = currentFile || (select && select.value ? select.value : null);
+    const selectedFile = populateDropdown(files, preferredFile);
+    lastFileListSignature = signature;
+
+    if (!selectedFile) {
+      currentFile = null;
+      stopTail();
+      return;
+    }
+
+    if (selectedFile !== currentFile) {
+      await loadFile(selectedFile);
+    }
+  } catch {
+    // Keep current dropdown and view state on transient refresh failures.
+  } finally {
+    fileListSyncInFlight = false;
   }
 }
 
@@ -369,14 +419,7 @@ function handleScroll(): void {
 
 async function init(): Promise<void> {
   try {
-    const files = await fetchFileList();
-    populateDropdown(files);
-
-    // Auto-load first file if available
-    const select = document.getElementById('log-file-select') as HTMLSelectElement | null;
-    if (select && select.value && select.value !== '') {
-      loadFile(select.value);
-    }
+    await syncFileList();
   } catch {
     const empty = document.getElementById('log-empty');
     if (empty) {
@@ -410,6 +453,18 @@ async function init(): Promise<void> {
   const outputEl = document.getElementById('log-output');
   if (outputEl) {
     outputEl.addEventListener('scroll', handleScroll);
+  }
+
+  if (window.gsdSSE) {
+    window.gsdSSE.subscribe('overview_update', function() {
+      void syncFileList();
+    });
+  }
+
+  if (!fileRefreshTimer) {
+    fileRefreshTimer = setInterval(function() {
+      void syncFileList();
+    }, FILE_LIST_REFRESH_INTERVAL_MS);
   }
 }
 
