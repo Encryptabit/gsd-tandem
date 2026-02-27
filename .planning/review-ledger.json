@@ -100,8 +100,18 @@
       "artifact_hash": "850cb0fb6ab8d783c279a42bfeec4de76d69ce670a620ba81faae5cc894a57c5",
       "note": "user_requested_pause",
       "recorded_at": "2026-02-27T03:20:20.225Z"
+    },
+    {
+      "entry_id": "1772164576407-ib67yo",
+      "gate": "plan",
+      "phase": "11",
+      "review_id": "b08cb5b6-801f-4d61-9924-1bf0c38531d2",
+      "status": "approved",
+      "artifact_hash": "526366cb65ff005ceda29d87e3fe61bbfe1dd5d5720ede396918bf29c407ece0",
+      "note": null,
+      "recorded_at": "2026-02-27T03:56:16.407Z"
     }
   ],
   "overrides": [],
-  "updated_at": "2026-02-27T03:20:20.225Z"
+  "updated_at": "2026-02-27T03:56:16.408Z"
 }
