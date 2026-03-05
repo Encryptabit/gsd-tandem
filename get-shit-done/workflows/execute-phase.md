@@ -68,7 +68,7 @@ Load plan inventory with wave grouping in one call:
 PLAN_INDEX=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs phase-plan-index "${PHASE_NUMBER}")
 ```
 
-Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `autonomous`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number → plan IDs), `incomplete`, `has_checkpoints`.
+Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `autonomous`, `ui_related`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number → plan IDs), `incomplete`, `has_checkpoints`, `has_ui_related_plans`.
 
 **Filtering:** Skip plans where `has_summary: true`. If `--gaps-only`: also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" → exit.
 
@@ -111,9 +111,27 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 2. **Spawn executor workers (runtime-aware):**
 
    Determine runtime per plan:
-   - `EXECUTOR_RUNTIME=task` → always use `Task(subagent_type="gsd-executor")`.
-   - `EXECUTOR_RUNTIME=hybrid` → use `codex exec` when `plan.autonomous=true`; otherwise `Task(...)`.
-   - `EXECUTOR_RUNTIME=codex` → prefer `codex exec`; if `plan.autonomous=false` (checkpoint/decision/auth flow), fall back to `Task(...)` and log why.
+   - If `plan.ui_related=true`: **always** use `Task(subagent_type="gsd-executor")` (UI/frontend work stays on Claude path).
+   - Else if `EXECUTOR_RUNTIME=task`: always use `Task(...)`.
+   - Else if `EXECUTOR_RUNTIME=hybrid`: use `codex exec` only when `plan.autonomous=true` and `plan.ui_related=false`; otherwise `Task(...)`.
+   - Else if `EXECUTOR_RUNTIME=codex`: prefer `codex exec` for non-UI autonomous plans; if `plan.autonomous=false` or `plan.ui_related=true`, fall back to `Task(...)` and log why.
+
+   Runtime decision snippet:
+   ```bash
+   PLAN_UI=$(echo "$PLAN_JSON" | jq -r '.ui_related // false')
+   PLAN_AUTO=$(echo "$PLAN_JSON" | jq -r '.autonomous // true')
+
+   if [ "$PLAN_UI" = "true" ]; then
+     WORKER_RUNTIME="task"
+     echo "UI-related plan detected; routing to Task/Claude runtime."
+   elif [ "$EXECUTOR_RUNTIME" = "task" ]; then
+     WORKER_RUNTIME="task"
+   elif [ "$EXECUTOR_RUNTIME" = "codex" ]; then
+     WORKER_RUNTIME=$([ "$PLAN_AUTO" = "true" ] && echo "codex" || echo "task")
+   else
+     WORKER_RUNTIME=$([ "$PLAN_AUTO" = "true" ] && echo "codex" || echo "task")
+   fi
+   ```
 
    **Task runtime (checkpoint-capable):**
    ```
@@ -158,7 +176,7 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    )
    ```
 
-   **Codex runtime (autonomous plans only):**
+   **Codex runtime (non-UI autonomous plans only):**
    ```
    EXEC_PROMPT=$(cat <<'PROMPT'
 First, read ~/.claude/agents/gsd-executor.md for your role and instructions.
@@ -178,7 +196,9 @@ Return git handoff metadata:
 PROMPT
 )
 
-if command -v codex >/dev/null 2>&1; then
+if [ "$PLAN_UI" = "true" ]; then
+  echo "UI-related plan; skipping codex runtime and using Task runtime."
+elif command -v codex >/dev/null 2>&1; then
   if [ -s ~/.nvm/nvm.sh ]; then . ~/.nvm/nvm.sh; fi
   printf '%s' "$EXEC_PROMPT" | codex exec --sandbox workspace-write --model "gpt-5.3-codex" -c 'model_reasoning_effort="xhigh"' -C "$(pwd)" -
 else

@@ -30,6 +30,7 @@
  *   summary-extract <path> [--fields]  Extract structured data from SUMMARY.md
  *   state-snapshot                     Structured parse of STATE.md
  *   phase-plan-index <phase>           Index plans with waves and status
+ *   plan-runtime-hints <plan-path>     Analyze plan routing hints (UI/autonomous/checkpoints)
  *   websearch <query>                  Search web via Brave API (if configured)
  *     [--limit N] [--freshness day|week|month]
  *
@@ -543,6 +544,90 @@ function parseMustHavesBlock(content, blockName) {
   if (current) items.push(current);
 
   return items;
+}
+
+function parseFrontmatterBool(value, fallback = false) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return fallback;
+}
+
+function asStringArray(value) {
+  if (Array.isArray(value)) {
+    return value.map(v => String(v).trim()).filter(Boolean);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
+}
+
+function extractPlanFilesModified(frontmatter) {
+  const value = frontmatter['files-modified'] !== undefined
+    ? frontmatter['files-modified']
+    : frontmatter.files_modified;
+  return asStringArray(value);
+}
+
+function classifyUiRelatedPlan(frontmatter, content, filesModified) {
+  // Explicit override takes priority when planner provides it.
+  const explicitUiKeys = ['ui_related', 'ui', 'frontend', 'is_ui', 'is_frontend'];
+  if (explicitUiKeys.some(key => parseFrontmatterBool(frontmatter[key], false))) {
+    return true;
+  }
+
+  let score = 0;
+
+  const tags = asStringArray(frontmatter.tags).map(tag => tag.toLowerCase());
+  if (tags.some(tag => /^(ui|ux|frontend|front-end|visual|design|styling|css|component|components)$/i.test(tag))) {
+    score += 3;
+  }
+
+  const loweredPaths = filesModified.map(file => file.toLowerCase());
+  if (loweredPaths.some(file => /\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|styl|html|mdx)$/.test(file))) {
+    score += 3;
+  }
+  if (loweredPaths.some(file => /(^|\/)(components?|pages?|layouts?|views?|screens?|styles?|themes?|ui)(\/|$)/.test(file))) {
+    score += 2;
+  }
+  if (loweredPaths.some(file => /(tailwind\.config|postcss\.config|storybook|\.stories\.)/.test(file))) {
+    score += 2;
+  }
+
+  const text = [
+    String(frontmatter.objective || ''),
+    String(frontmatter.name || ''),
+    String(content || ''),
+  ].join('\n').toLowerCase();
+
+  const keywordMatches = text.match(/\b(ui|ux|frontend|front-end|visual|layout|styling|style|css|tailwind|component|page|screen|responsive|a11y|accessibility|design system|animation)\b/g) || [];
+  const keywordCount = new Set(keywordMatches).size;
+  if (keywordCount >= 2) {
+    score += 2;
+  } else if (keywordCount === 1) {
+    score += 1;
+  }
+
+  return score >= 3;
+}
+
+function analyzePlanRouting(frontmatter, content) {
+  const filesModified = extractPlanFilesModified(frontmatter);
+  const autonomous = parseFrontmatterBool(frontmatter.autonomous, true);
+  const hasCheckpoints = /<task\s+type=["']?checkpoint/i.test(content);
+  const uiRelated = classifyUiRelatedPlan(frontmatter, content, filesModified);
+
+  return {
+    autonomous,
+    has_checkpoints: hasCheckpoints,
+    files_modified: filesModified,
+    ui_related: uiRelated,
+  };
 }
 
 function output(result, raw, rawValue) {
@@ -2447,7 +2532,7 @@ function cmdPhasePlanIndex(cwd, phase, raw) {
   }
 
   if (!phaseDir) {
-    output({ phase: normalized, error: 'Phase not found', plans: [], waves: {}, incomplete: [], has_checkpoints: false }, raw);
+    output({ phase: normalized, error: 'Phase not found', plans: [], waves: {}, incomplete: [], has_checkpoints: false, has_ui_related_plans: false }, raw);
     return;
   }
 
@@ -2465,6 +2550,7 @@ function cmdPhasePlanIndex(cwd, phase, raw) {
   const waves = {};
   const incomplete = [];
   let hasCheckpoints = false;
+  let hasUiRelatedPlans = false;
 
   for (const planFile of planFiles) {
     const planId = planFile.replace('-PLAN.md', '').replace('PLAN.md', '');
@@ -2479,20 +2565,14 @@ function cmdPhasePlanIndex(cwd, phase, raw) {
     // Parse wave as integer
     const wave = parseInt(fm.wave, 10) || 1;
 
-    // Parse autonomous (default true if not specified)
-    let autonomous = true;
-    if (fm.autonomous !== undefined) {
-      autonomous = fm.autonomous === 'true' || fm.autonomous === true;
-    }
+    const routing = analyzePlanRouting(fm, content);
+    const autonomous = routing.autonomous;
 
-    if (!autonomous) {
+    if (!autonomous || routing.has_checkpoints) {
       hasCheckpoints = true;
     }
-
-    // Parse files-modified
-    let filesModified = [];
-    if (fm['files-modified']) {
-      filesModified = Array.isArray(fm['files-modified']) ? fm['files-modified'] : [fm['files-modified']];
+    if (routing.ui_related) {
+      hasUiRelatedPlans = true;
     }
 
     const hasSummary = completedPlanIds.has(planId);
@@ -2504,8 +2584,9 @@ function cmdPhasePlanIndex(cwd, phase, raw) {
       id: planId,
       wave,
       autonomous,
+      ui_related: routing.ui_related,
       objective: fm.objective || null,
-      files_modified: filesModified,
+      files_modified: routing.files_modified,
       task_count: taskCount,
       has_summary: hasSummary,
     };
@@ -2526,9 +2607,35 @@ function cmdPhasePlanIndex(cwd, phase, raw) {
     waves,
     incomplete,
     has_checkpoints: hasCheckpoints,
+    has_ui_related_plans: hasUiRelatedPlans,
   };
 
   output(result, raw);
+}
+
+function cmdPlanRuntimeHints(cwd, planPathArg, raw) {
+  if (!planPathArg) {
+    error('plan-path required for plan-runtime-hints');
+  }
+
+  const resolved = path.isAbsolute(planPathArg)
+    ? planPathArg
+    : path.join(cwd, planPathArg);
+
+  if (!fs.existsSync(resolved)) {
+    output({ error: 'Plan file not found', path: planPathArg }, raw);
+    return;
+  }
+
+  const content = fs.readFileSync(resolved, 'utf-8');
+  const frontmatter = extractFrontmatter(content);
+  const analysis = analyzePlanRouting(frontmatter, content);
+  const relPath = path.relative(cwd, resolved);
+
+  output({
+    path: relPath,
+    ...analysis,
+  }, raw);
 }
 
 function cmdStateSnapshot(cwd, raw) {
@@ -5912,6 +6019,11 @@ async function main() {
 
     case 'phase-plan-index': {
       cmdPhasePlanIndex(cwd, args[1], raw);
+      break;
+    }
+
+    case 'plan-runtime-hints': {
+      cmdPlanRuntimeHints(cwd, args[1], raw);
       break;
     }
 

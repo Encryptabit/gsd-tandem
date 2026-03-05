@@ -48,8 +48,12 @@ ls .planning/phases/XX-name/*-SUMMARY.md 2>/dev/null | sort
 Find first PLAN without matching SUMMARY. Decimal phases supported (`01.1-hotfix/`):
 
 ```bash
-PHASE=$(echo "$PLAN_PATH" | grep -oE '[0-9]+(\.[0-9]+)?-[0-9]+')
+PLAN_ID=$(echo "$PLAN_PATH" | grep -oE '[0-9]+(\.[0-9]+)?-[0-9]+')
+PHASE=${PLAN_ID%-*}
 # config_content already loaded via --include config in init_context
+RUNTIME_HINTS=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs plan-runtime-hints "$PLAN_PATH")
+PLAN_UI_RELATED=$(echo "$RUNTIME_HINTS" | jq -r '.ui_related // false')
+PLAN_AUTONOMOUS=$(echo "$RUNTIME_HINTS" | jq -r '.autonomous // true')
 ```
 
 <if mode="yolo">
@@ -77,13 +81,15 @@ grep -n "type=\"checkpoint" .planning/phases/XX-name/{phase}-{plan}-PLAN.md
 
 | Checkpoints | Pattern | Execution |
 |-------------|---------|-----------|
-| None | A (autonomous) | Single worker (Task or codex): full plan + SUMMARY + commit |
+| None | A (autonomous) | Single worker (Task or codex for non-UI plans): full plan + SUMMARY + commit |
 | Verify-only | B (segmented) | Segments between checkpoints. After none/human-verify → SUBAGENT. After decision/human-action → MAIN |
 | Decision | C (main) | Execute entirely in main context |
 
 **Pattern A (autonomous):** init_agent_tracking → choose worker runtime:
-- If `EXECUTOR_RUNTIME=task`: spawn `Task(subagent_type="gsd-executor", model=executor_model)` with full-plan prompt.
-- If `EXECUTOR_RUNTIME=hybrid|codex`: run `codex exec` with equivalent prompt and plan path.
+- If `PLAN_UI_RELATED=true`: always spawn `Task(subagent_type="gsd-executor", model=executor_model)` (UI work stays on Claude path).
+- Else if `EXECUTOR_RUNTIME=task`: spawn `Task(subagent_type="gsd-executor", model=executor_model)` with full-plan prompt.
+- Else if `EXECUTOR_RUNTIME=hybrid|codex` and `PLAN_AUTONOMOUS=true`: run `codex exec` with equivalent prompt and plan path.
+- Else: fall back to `Task(...)`.
 If codex CLI is unavailable, fall back to `Task(...)`.
 
 Codex command template:
@@ -93,7 +99,7 @@ printf '%s' "$EXEC_PROMPT" | codex exec --sandbox workspace-write --model "gpt-5
 ```
 
 **Pattern B (verify-only checkpoints):** Execute segment-by-segment.
-- Autonomous segments: use runtime routing above (Task vs codex).
+- Autonomous non-UI segments: use runtime routing above (Task vs codex).
 - Checkpoint/decision/human-action segments: always main context or Task continuation flow (codex cannot resolve interactive checkpoints safely).
 After all segments: aggregate, create SUMMARY, commit. See segment_execution.
 
@@ -126,7 +132,7 @@ Pattern B only (verify-only checkpoints). Skip for A/C.
 
 1. Parse segment map: checkpoint locations and types
 2. Per segment:
-   - Worker route (autonomous segments): spawn gsd-executor Task or codex exec based on `EXECUTOR_RUNTIME`. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, NO SUMMARY/commit. Track Task workers via agent protocol; for codex workers capture stdout/stderr per segment.
+   - Worker route (autonomous non-UI segments): spawn gsd-executor Task or codex exec based on `EXECUTOR_RUNTIME` and `PLAN_UI_RELATED`. If UI-related, force Task runtime. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, NO SUMMARY/commit. Track Task workers via agent protocol; for codex workers capture stdout/stderr per segment.
    - Main route: execute tasks using standard flow (step name="execute")
 3. After ALL segments: aggregate files/deviations/decisions → create SUMMARY.md → commit → self-check:
    - Verify key-files.created exist on disk with `[ -f ]`

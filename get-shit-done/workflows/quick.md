@@ -253,10 +253,14 @@ Runtime-aware execution for quick plan:
 
 ```bash
 PLAN_PATH="${QUICK_DIR}/${next_num}-PLAN.md"
-HAS_CHECKPOINTS=$(grep -q 'type="checkpoint' "$PLAN_PATH" && echo "true" || echo "false")
+RUNTIME_HINTS=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs plan-runtime-hints "$PLAN_PATH")
+HAS_CHECKPOINTS=$(echo "$RUNTIME_HINTS" | jq -r '.has_checkpoints // false')
+UI_RELATED=$(echo "$RUNTIME_HINTS" | jq -r '.ui_related // false')
 
-# Quick plans are usually autonomous; checkpoint plans must stay on Task runtime.
-if [ "$EXECUTOR_RUNTIME" = "task" ]; then
+# Quick plans are usually autonomous; checkpoint and UI plans stay on Task runtime.
+if [ "$UI_RELATED" = "true" ]; then
+  WORKER_RUNTIME="task"
+elif [ "$EXECUTOR_RUNTIME" = "task" ]; then
   WORKER_RUNTIME="task"
 elif [ "$EXECUTOR_RUNTIME" = "codex" ]; then
   WORKER_RUNTIME="codex"
@@ -264,9 +268,9 @@ else
   WORKER_RUNTIME=$([ "$HAS_CHECKPOINTS" = "true" ] && echo "task" || echo "codex")
 fi
 
-if [ "$HAS_CHECKPOINTS" = "true" ] && [ "$WORKER_RUNTIME" = "codex" ]; then
+if { [ "$HAS_CHECKPOINTS" = "true" ] || [ "$UI_RELATED" = "true" ]; } && [ "$WORKER_RUNTIME" = "codex" ]; then
   WORKER_RUNTIME="task"
-  echo "Checkpoint tasks detected; falling back to Task runtime for quick execution."
+  echo "Checkpoint or UI task detected; falling back to Task runtime for quick execution."
 fi
 ```
 
@@ -294,7 +298,7 @@ Project state: @.planning/STATE.md
 )
 ```
 
-**If `WORKER_RUNTIME=codex` (autonomous quick plans):**
+**If `WORKER_RUNTIME=codex` (autonomous non-UI quick plans):**
 ```bash
 EXEC_PROMPT=$(cat <<PROMPT
 First, read ~/.claude/agents/gsd-executor.md for your role and instructions.

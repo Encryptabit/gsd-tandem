@@ -91,9 +91,9 @@ AskUserQuestion([
     header: "Executor",
     multiSelect: false,
     options: [
-      { label: "Hybrid (Recommended)", description: "Use codex exec for autonomous plans, Task gsd-executor for checkpointed plans" },
+      { label: "Hybrid (Recommended)", description: "Use codex exec for autonomous non-UI plans, Task gsd-executor for UI or checkpointed plans" },
       { label: "Task only", description: "Always use Task subagents for execution" },
-      { label: "Codex preferred", description: "Prefer codex exec; checkpointed plans still fall back to Task" }
+      { label: "Codex preferred", description: "Prefer codex exec for autonomous non-UI plans; UI/checkpointed plans still fall back to Task" }
     ]
   },
   {

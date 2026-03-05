@@ -699,6 +699,7 @@ files-modified: [prisma/schema.prisma, src/lib/db.ts]
     assert.strictEqual(output.plans[0].autonomous, true, 'autonomous extracted');
     assert.strictEqual(output.plans[0].objective, 'Set up database schema', 'objective extracted');
     assert.deepStrictEqual(output.plans[0].files_modified, ['prisma/schema.prisma', 'src/lib/db.ts'], 'files extracted');
+    assert.strictEqual(output.plans[0].ui_related, false, 'backend plan not marked ui-related');
     assert.strictEqual(output.plans[0].task_count, 2, 'task count correct');
     assert.strictEqual(output.plans[0].has_summary, false, 'no summary yet');
   });
@@ -796,12 +797,79 @@ objective: Manual review needed
     assert.strictEqual(output.plans[0].autonomous, false, 'plan marked non-autonomous');
   });
 
+  test('flags UI-related autonomous plans for Task runtime routing', () => {
+    const phaseDir = path.join(tmpDir, '.planning', 'phases', '03-dashboard');
+    fs.mkdirSync(phaseDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(phaseDir, '03-01-PLAN.md'),
+      `---
+wave: 1
+autonomous: true
+objective: Build responsive dashboard UI
+files-modified: [src/components/Dashboard.tsx, src/styles/dashboard.css]
+---
+
+## Task 1: Build dashboard layout
+`
+    );
+
+    const result = runGsdTools('phase-plan-index 03', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.has_ui_related_plans, true, 'phase should report ui-related plans');
+    assert.strictEqual(output.plans[0].ui_related, true, 'plan marked ui-related');
+  });
+
   test('phase not found returns error', () => {
     const result = runGsdTools('phase-plan-index 99', tmpDir);
     assert.ok(result.success, `Command should succeed: ${result.error}`);
 
     const output = JSON.parse(result.output);
     assert.strictEqual(output.error, 'Phase not found', 'should report phase not found');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// plan-runtime-hints command
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('plan-runtime-hints command', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('returns UI/autonomous/checkpoint hints for a plan', () => {
+    const planPath = path.join(tmpDir, '.planning', 'phases', '05-ui', '05-01-PLAN.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(
+      planPath,
+      `---
+autonomous: true
+files_modified: [src/pages/Settings.tsx, src/styles/settings.css]
+---
+
+## Tasks
+<task type="auto">
+  <name>Create settings UI</name>
+</task>
+`
+    );
+
+    const result = runGsdTools('plan-runtime-hints .planning/phases/05-ui/05-01-PLAN.md', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.autonomous, true, 'autonomous extracted');
+    assert.strictEqual(output.has_checkpoints, false, 'no checkpoint tasks');
+    assert.strictEqual(output.ui_related, true, 'ui-related detected');
   });
 });
 
