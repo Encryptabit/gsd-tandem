@@ -1,5 +1,5 @@
 <purpose>
-Execute small, ad-hoc tasks with GSD guarantees (atomic commits, STATE.md tracking). Quick mode spawns gsd-planner (quick mode) + gsd-executor(s), tracks tasks in `.planning/quick/`, and updates STATE.md's "Quick Tasks Completed" table.
+Execute small, ad-hoc tasks with GSD guarantees (atomic commits, STATE.md tracking). Quick mode spawns gsd-planner (quick mode) + executor workers (Task gsd-executor or codex exec), tracks tasks in `.planning/quick/`, and updates STATE.md's "Quick Tasks Completed" table.
 
 With `--full` flag: enables plan-checking (max 2 iterations) and post-execution verification for quality guarantees without full milestone ceremony.
 </purpose>
@@ -47,6 +47,15 @@ INIT=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs init quick "$DESCRIPTION")
 ```
 
 Parse JSON for: `planner_model`, `executor_model`, `checker_model`, `verifier_model`, `commit_docs`, `next_num`, `slug`, `date`, `timestamp`, `quick_dir`, `task_dir`, `roadmap_exists`, `planning_exists`.
+
+Resolve executor runtime:
+```bash
+EXECUTOR_RUNTIME=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get execution.executor_runtime 2>/dev/null || echo "hybrid")
+case "$EXECUTOR_RUNTIME" in
+  hybrid|task|codex) ;;
+  *) EXECUTOR_RUNTIME="hybrid" ;;
+esac
+```
 
 **If `roadmap_exists` is false:** Error — Quick mode requires an active project with ROADMAP.md. Run `/gsd:new-project` first.
 
@@ -240,8 +249,30 @@ Offer: 1) Force proceed, 2) Abort
 
 **Step 6: Spawn executor**
 
-Spawn gsd-executor with plan reference:
+Runtime-aware execution for quick plan:
 
+```bash
+PLAN_PATH="${QUICK_DIR}/${next_num}-PLAN.md"
+HAS_CHECKPOINTS=$(grep -q 'type="checkpoint' "$PLAN_PATH" && echo "true" || echo "false")
+
+# Quick plans are usually autonomous; checkpoint plans must stay on Task runtime.
+if [ "$EXECUTOR_RUNTIME" = "task" ]; then
+  WORKER_RUNTIME="task"
+elif [ "$EXECUTOR_RUNTIME" = "codex" ]; then
+  WORKER_RUNTIME="codex"
+else
+  WORKER_RUNTIME=$([ "$HAS_CHECKPOINTS" = "true" ] && echo "task" || echo "codex")
+fi
+
+if [ "$HAS_CHECKPOINTS" = "true" ] && [ "$WORKER_RUNTIME" = "codex" ]; then
+  WORKER_RUNTIME="task"
+  echo "Checkpoint tasks detected; falling back to Task runtime for quick execution."
+fi
+```
+
+Run one executor block based on `WORKER_RUNTIME`:
+
+**If `WORKER_RUNTIME=task`:**
 ```
 Task(
   prompt="
@@ -263,12 +294,33 @@ Project state: @.planning/STATE.md
 )
 ```
 
+**If `WORKER_RUNTIME=codex` (autonomous quick plans):**
+```bash
+EXEC_PROMPT=$(cat <<PROMPT
+First, read ~/.claude/agents/gsd-executor.md for your role and instructions.
+Execute quick task ${next_num}.
+Plan path: ${QUICK_DIR}/${next_num}-PLAN.md
+State path: .planning/STATE.md
+Summary path: ${QUICK_DIR}/${next_num}-SUMMARY.md
+Do NOT update ROADMAP.md.
+PROMPT
+)
+
+if command -v codex >/dev/null 2>&1; then
+  if [ -s ~/.nvm/nvm.sh ]; then . ~/.nvm/nvm.sh; fi
+  printf '%s' "$EXEC_PROMPT" | codex exec --sandbox workspace-write --model "gpt-5.3-codex" -c 'model_reasoning_effort="xhigh"' -C "$(pwd)" -
+else
+  echo "codex CLI not found; using Task runtime."
+  # fallback to Task block above
+fi
+```
+
 After executor returns:
 1. Verify summary exists at `${QUICK_DIR}/${next_num}-SUMMARY.md`
 2. Extract commit hash from executor output
 3. Report completion status
 
-**Known Claude Code bug (classifyHandoffIfNeeded):** If executor reports "failed" with error `classifyHandoffIfNeeded is not defined`, this is a Claude Code runtime bug — not a real failure. Check if summary file exists and git log shows commits. If so, treat as successful.
+**Known Claude Code bug (classifyHandoffIfNeeded):** If Task-based executor reports "failed" with error `classifyHandoffIfNeeded is not defined`, this is a Claude Code runtime bug — not a real failure. Check if summary file exists and git log shows commits. If so, treat as successful.
 
 If summary not found, error: "Executor failed to create ${next_num}-SUMMARY.md"
 

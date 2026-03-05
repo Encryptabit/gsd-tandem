@@ -1,9 +1,9 @@
 <purpose>
-Execute all plans in a phase using wave-based parallel execution. Orchestrator stays lean — delegates plan execution to subagents.
+Execute all plans in a phase using wave-based parallel execution. Orchestrator stays lean — delegates plan execution to workers (Task subagents or codex exec).
 </purpose>
 
 <core_principle>
-Orchestrator coordinates, not executes. Each subagent loads the full execute-plan context. Orchestrator: discover plans → analyze deps → group waves → spawn agents → handle checkpoints → collect results.
+Orchestrator coordinates, not executes. Each worker loads the full execute-plan context. Orchestrator: discover plans → analyze deps → group waves → spawn workers → handle checkpoints → collect results.
 </core_principle>
 
 <required_reading>
@@ -20,6 +20,15 @@ INIT=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs init execute-phase "${PHAS
 ```
 
 Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`.
+
+Resolve executor runtime strategy:
+```bash
+EXECUTOR_RUNTIME=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get execution.executor_runtime 2>/dev/null || echo "hybrid")
+case "$EXECUTOR_RUNTIME" in
+  hybrid|task|codex) ;;
+  *) EXECUTOR_RUNTIME="hybrid" ;;
+esac
+```
 
 Capture phase start ref (used by orchestrator review gate):
 ```bash
@@ -99,11 +108,14 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    - Bad: "Executing terrain generation plan"
    - Good: "Procedural terrain generator using Perlin noise — creates height maps, biome zones, and collision meshes. Required before vehicle physics can interact with ground."
 
-2. **Spawn executor agents:**
+2. **Spawn executor workers (runtime-aware):**
 
-   Pass paths only — executors read files themselves with their fresh 200k context.
-   This keeps orchestrator context lean (~10-15%).
+   Determine runtime per plan:
+   - `EXECUTOR_RUNTIME=task` → always use `Task(subagent_type="gsd-executor")`.
+   - `EXECUTOR_RUNTIME=hybrid` → use `codex exec` when `plan.autonomous=true`; otherwise `Task(...)`.
+   - `EXECUTOR_RUNTIME=codex` → prefer `codex exec`; if `plan.autonomous=false` (checkpoint/decision/auth flow), fall back to `Task(...)` and log why.
 
+   **Task runtime (checkpoint-capable):**
    ```
    Task(
      subagent_type="gsd-executor",
@@ -146,7 +158,38 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    )
    ```
 
-3. **Wait for all agents in wave to complete.**
+   **Codex runtime (autonomous plans only):**
+   ```
+   EXEC_PROMPT=$(cat <<'PROMPT'
+First, read ~/.claude/agents/gsd-executor.md for your role and instructions.
+
+Execute plan {plan_number} of phase {phase_number}-{phase_name}.
+Plan path: {phase_dir}/{plan_file}
+State path: .planning/STATE.md
+Config path: .planning/config.json
+
+Follow execute-plan workflow semantics from ~/.claude/get-shit-done/workflows/execute-plan.md.
+Commit each task atomically, create SUMMARY.md, and update STATE.md.
+
+Return git handoff metadata:
+- Plan Ref Range: <start_ref>..<end_ref>
+- Plan Diff File: .planning/tmp/<generated>.patch
+- Changed Files (<start_ref>..<end_ref>): list
+PROMPT
+)
+
+if command -v codex >/dev/null 2>&1; then
+  if [ -s ~/.nvm/nvm.sh ]; then . ~/.nvm/nvm.sh; fi
+  printf '%s' "$EXEC_PROMPT" | codex exec --sandbox workspace-write --model "gpt-5.3-codex" -c 'model_reasoning_effort="xhigh"' -C "$(pwd)" -
+else
+  # codex CLI missing: fail safe to Task runtime block above.
+  echo "codex CLI not found; using Task runtime for this plan."
+fi
+   ```
+
+   For parallel waves, launch one worker per plan (Task or codex process) and wait for all to finish before moving to step 3.
+
+3. **Wait for all workers in wave to complete.**
 
 4. **Report completion — spot-check claims first:**
 
@@ -521,14 +564,14 @@ The workflow ends. The user runs `/gsd:progress` or invokes the transition workf
 </process>
 
 <context_efficiency>
-Orchestrator: ~10-15% context. Subagents: fresh 200k each. No polling (Task blocks). No context bleed.
+Orchestrator: ~10-15% context. Workers (Task or codex exec) each get fresh context. No polling (Task blocks, codex exec blocks per process). No context bleed.
 </context_efficiency>
 
 <failure_handling>
 - **classifyHandoffIfNeeded false failure:** Agent reports "failed" but error is `classifyHandoffIfNeeded is not defined` → Claude Code bug, not GSD. Spot-check (SUMMARY exists, commits present) → if pass, treat as success
 - **Agent fails mid-plan:** Missing SUMMARY.md → report, ask user how to proceed
 - **Dependency chain breaks:** Wave 1 fails → Wave 2 dependents likely fail → user chooses attempt or skip
-- **All agents in wave fail:** Systemic issue → stop, report for investigation
+- **All workers in wave fail:** Systemic issue → stop, report for investigation
 - **Checkpoint unresolvable:** "Skip this plan?" or "Abort phase execution?" → record partial progress in STATE.md
 </failure_handling>
 

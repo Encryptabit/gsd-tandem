@@ -20,6 +20,9 @@
   },
   "review_granularity": "per_task",
   "execution_mode": "blocking",
+  "execution": {
+    "executor_runtime": "hybrid"
+  },
   "reviewer_pool": {
     "workspace_path": "auto",
     "model": "gpt-5.3-codex",

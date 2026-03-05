@@ -2629,6 +2629,7 @@ describe('review ledger commands', () => {
     assert.strictEqual('tandem_enabled' in updated, false);
     assert.strictEqual(updated.review_granularity, 'per_task');
     assert.strictEqual(updated.execution_mode, 'blocking');
+    assert.strictEqual(updated.execution.executor_runtime, 'hybrid');
     assert.strictEqual(updated.reviewer_pool.workspace_path, 'auto');
     assert.strictEqual(updated.reviewer_pool.model, 'gpt-5.3-codex');
   });

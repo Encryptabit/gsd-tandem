@@ -193,6 +193,9 @@ function loadConfig(cwd) {
     brave_search: false,
     review_granularity: 'per_task',
     execution_mode: 'blocking',
+    execution: {
+      executor_runtime: 'hybrid',
+    },
     reviewer_pool: {
       workspace_path: 'auto',
       model: 'gpt-5.3-codex',
@@ -272,6 +275,12 @@ function loadConfig(cwd) {
       brave_search: get('brave_search') ?? defaults.brave_search,
       review_granularity: get('review_granularity') ?? defaults.review_granularity,
       execution_mode: get('execution_mode') ?? defaults.execution_mode,
+      execution: {
+        ...(defaults.execution || {}),
+        ...((get('execution') && typeof get('execution') === 'object') ? get('execution') : {}),
+        executor_runtime: get('executor_runtime', { section: 'execution', field: 'executor_runtime' })
+          ?? defaults.execution.executor_runtime,
+      },
       reviewer_pool: get('reviewer_pool') ?? defaults.reviewer_pool,
       review,
     };
@@ -692,8 +701,14 @@ function cmdConfigEnsureSection(cwd, raw) {
         prompt_template_path: 'reviewer_prompt.md',
         background_check_interval_seconds: 30.0,
       };
+      const executionDefaults = {
+        executor_runtime: 'hybrid',
+      };
       const existingWithoutLegacy = { ...existing };
       delete existingWithoutLegacy.tandem_enabled;
+      const existingExecution = (existing.execution && typeof existing.execution === 'object')
+        ? existing.execution
+        : {};
       const resolvedReviewEnabled = existing.review?.enabled !== undefined
         ? !!existing.review.enabled
         : reviewDefaults.enabled;
@@ -701,6 +716,7 @@ function cmdConfigEnsureSection(cwd, raw) {
         ...existingWithoutLegacy,
         review_granularity: existing.review_granularity !== undefined ? existing.review_granularity : 'per_task',
         execution_mode: existing.execution_mode !== undefined ? existing.execution_mode : 'blocking',
+        execution: { ...executionDefaults, ...existingExecution },
         reviewer_pool: existing.reviewer_pool !== undefined ? existing.reviewer_pool : reviewerPoolDefaults,
         review: {
           ...reviewDefaults,
@@ -758,6 +774,9 @@ function cmdConfigEnsureSection(cwd, raw) {
     brave_search: hasBraveSearch,
     review_granularity: 'per_task',
     execution_mode: 'blocking',
+    execution: {
+      executor_runtime: 'hybrid',
+    },
     reviewer_pool: {
       workspace_path: 'auto',
       model: 'gpt-5.3-codex',
@@ -788,6 +807,7 @@ function cmdConfigEnsureSection(cwd, raw) {
     ...hardcoded,
     ...userDefaults,
     workflow: { ...hardcoded.workflow, ...(userDefaults.workflow || {}) },
+    execution: { ...hardcoded.execution, ...(userDefaults.execution || {}) },
     reviewer_pool: userDefaults.reviewer_pool !== undefined
       ? userDefaults.reviewer_pool
       : hardcoded.reviewer_pool,
@@ -4327,6 +4347,9 @@ function cmdValidateHealth(cwd, options, raw) {
               parallelization: true,
               review_granularity: 'per_task',
               execution_mode: 'blocking',
+              execution: {
+                executor_runtime: 'hybrid',
+              },
               reviewer_pool: {
                 workspace_path: 'auto',
                 model: 'gpt-5.3-codex',

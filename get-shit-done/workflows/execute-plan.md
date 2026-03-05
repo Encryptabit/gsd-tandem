@@ -20,6 +20,15 @@ INIT=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs init execute-phase "${PHAS
 
 Extract from init JSON: `executor_model`, `commit_docs`, `phase_dir`, `phase_number`, `plans`, `summaries`, `incomplete_plans`.
 
+Resolve executor runtime:
+```bash
+EXECUTOR_RUNTIME=$(node ~/.claude/get-shit-done/bin/gsd-tools.cjs config-get execution.executor_runtime 2>/dev/null || echo "hybrid")
+case "$EXECUTOR_RUNTIME" in
+  hybrid|task|codex) ;;
+  *) EXECUTOR_RUNTIME="hybrid" ;;
+esac
+```
+
 **File contents (from --include):** `state_content`, `config_content`. Access with:
 ```bash
 STATE_CONTENT=$(echo "$INIT" | jq -r '.state_content // empty')
@@ -68,17 +77,29 @@ grep -n "type=\"checkpoint" .planning/phases/XX-name/{phase}-{plan}-PLAN.md
 
 | Checkpoints | Pattern | Execution |
 |-------------|---------|-----------|
-| None | A (autonomous) | Single subagent: full plan + SUMMARY + commit |
+| None | A (autonomous) | Single worker (Task or codex): full plan + SUMMARY + commit |
 | Verify-only | B (segmented) | Segments between checkpoints. After none/human-verify → SUBAGENT. After decision/human-action → MAIN |
 | Decision | C (main) | Execute entirely in main context |
 
-**Pattern A:** init_agent_tracking → spawn Task(subagent_type="gsd-executor", model=executor_model) with prompt: execute plan at [path], autonomous, all tasks + SUMMARY + commit, follow deviation/auth rules, report: plan name, tasks, SUMMARY path, commit hash → track agent_id → wait → update tracking → report.
+**Pattern A (autonomous):** init_agent_tracking → choose worker runtime:
+- If `EXECUTOR_RUNTIME=task`: spawn `Task(subagent_type="gsd-executor", model=executor_model)` with full-plan prompt.
+- If `EXECUTOR_RUNTIME=hybrid|codex`: run `codex exec` with equivalent prompt and plan path.
+If codex CLI is unavailable, fall back to `Task(...)`.
 
-**Pattern B:** Execute segment-by-segment. Autonomous segments: spawn subagent for assigned tasks only (no SUMMARY/commit). Checkpoints: main context. After all segments: aggregate, create SUMMARY, commit. See segment_execution.
+Codex command template:
+```bash
+if [ -s ~/.nvm/nvm.sh ]; then . ~/.nvm/nvm.sh; fi
+printf '%s' "$EXEC_PROMPT" | codex exec --sandbox workspace-write --model "gpt-5.3-codex" -c 'model_reasoning_effort="xhigh"' -C "$(pwd)" -
+```
+
+**Pattern B (verify-only checkpoints):** Execute segment-by-segment.
+- Autonomous segments: use runtime routing above (Task vs codex).
+- Checkpoint/decision/human-action segments: always main context or Task continuation flow (codex cannot resolve interactive checkpoints safely).
+After all segments: aggregate, create SUMMARY, commit. See segment_execution.
 
 **Pattern C:** Execute in main using standard flow (step name="execute").
 
-Fresh context per subagent preserves peak quality. Main context stays lean.
+Fresh context per worker (Task subagent or codex exec) preserves peak quality. Main context stays lean.
 </step>
 
 <step name="init_agent_tracking">
@@ -105,14 +126,14 @@ Pattern B only (verify-only checkpoints). Skip for A/C.
 
 1. Parse segment map: checkpoint locations and types
 2. Per segment:
-   - Subagent route: spawn gsd-executor for assigned tasks only. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, NO SUMMARY/commit. Track via agent protocol.
+   - Worker route (autonomous segments): spawn gsd-executor Task or codex exec based on `EXECUTOR_RUNTIME`. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, NO SUMMARY/commit. Track Task workers via agent protocol; for codex workers capture stdout/stderr per segment.
    - Main route: execute tasks using standard flow (step name="execute")
 3. After ALL segments: aggregate files/deviations/decisions → create SUMMARY.md → commit → self-check:
    - Verify key-files.created exist on disk with `[ -f ]`
    - Check `git log --oneline --all --grep="{phase}-{plan}"` returns ≥1 commit
    - Append `## Self-Check: PASSED` or `## Self-Check: FAILED` to SUMMARY
 
-   **Known Claude Code bug (classifyHandoffIfNeeded):** If any segment agent reports "failed" with `classifyHandoffIfNeeded is not defined`, this is a Claude Code runtime bug — not a real failure. Run spot-checks; if they pass, treat as successful.
+   **Known Claude Code bug (classifyHandoffIfNeeded):** If any Task-based segment worker reports "failed" with `classifyHandoffIfNeeded is not defined`, this is a Claude Code runtime bug — not a real failure. Run spot-checks; if they pass, treat as successful.
 
 
 

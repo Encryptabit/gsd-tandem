@@ -231,6 +231,7 @@ Map Round 3 answers to config:
 - `review.fail_mode`: Fail Mode (Block=`closed`, Warn Only=`open`)
 - `review.allow_override`: Override (No=false, Yes=true)
 - `execution_mode`: Execution (Blocking=`blocking`, Optimistic=`optimistic`)
+- `execution.executor_runtime`: Default to `hybrid` (codex for autonomous plans, Task for checkpointed plans)
 - `review_granularity`: Granularity (Per Task=`per_task`, Per Plan=`per_plan`)
 - `review.required_gates` from Gate Scope:
   - All stages: `discuss/plan/execute/verify=true`
@@ -260,6 +261,9 @@ Create `.planning/config.json` with mode set to "yolo":
   },
   "review_granularity": "per_task|per_plan",
   "execution_mode": "blocking|optimistic",
+  "execution": {
+    "executor_runtime": "hybrid"
+  },
   "reviewer_pool": {
     "workspace_path": "auto",
     "model": "gpt-5.3-codex",
@@ -639,6 +643,7 @@ Map Round 3 answers to config:
 - `review.fail_mode`: Fail Mode (Block=`closed`, Warn Only=`open`)
 - `review.allow_override`: Override (No=false, Yes=true)
 - `execution_mode`: Execution (Blocking=`blocking`, Optimistic=`optimistic`)
+- `execution.executor_runtime`: Default to `hybrid` (codex for autonomous plans, Task for checkpointed plans)
 - `review_granularity`: Granularity (Per Task=`per_task`, Per Plan=`per_plan`)
 - `review.required_gates` from Gate Scope:
   - All stages: `discuss/plan/execute/verify=true`
@@ -668,6 +673,9 @@ Create `.planning/config.json` with all settings:
   },
   "review_granularity": "per_task|per_plan",
   "execution_mode": "blocking|optimistic",
+  "execution": {
+    "executor_runtime": "hybrid"
+  },
   "reviewer_pool": {
     "workspace_path": "auto",
     "model": "gpt-5.3-codex",

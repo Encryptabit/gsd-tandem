@@ -21,6 +21,9 @@ Configuration options for `.planning/` directory behavior.
 },
 "review_granularity": "per_task",
 "execution_mode": "blocking",
+"execution": {
+  "executor_runtime": "hybrid"
+},
 "reviewer_pool": {
   "workspace_path": "auto",
   "model": "gpt-5.3-codex",
@@ -52,6 +55,7 @@ Configuration options for `.planning/` directory behavior.
 | `review.required_gates.*` | `true` | Per-stage enforcement for `discuss`, `plan`, `execute`, `verify` |
 | `review_granularity` | `"per_task"` | Tandem review grouping strategy (`per_task` or `per_plan`) |
 | `execution_mode` | `"blocking"` | Tandem behavior (`blocking` or `optimistic`) |
+| `execution.executor_runtime` | `"hybrid"` | Executor runtime routing: `hybrid` (codex for autonomous, Task for checkpointed), `task`, or `codex` |
 | `reviewer_pool` | object | Auto-reviewer spawn/scaling configuration for broker lifecycle |
 | `git.branching_strategy` | `"none"` | Git branching approach: `"none"`, `"phase"`, or `"milestone"` |
 | `git.phase_branch_template` | `"gsd/phase-{phase}-{slug}"` | Branch template for phase strategy |

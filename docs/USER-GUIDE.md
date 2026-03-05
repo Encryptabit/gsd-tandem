@@ -222,6 +222,9 @@ GSD stores project settings in `.planning/config.json`. Configure during `/gsd:n
   },
   "review_granularity": "per_task",
   "execution_mode": "blocking",
+  "execution": {
+    "executor_runtime": "hybrid"
+  },
   "reviewer_pool": {
     "workspace_path": "auto",
     "model": "gpt-5.3-codex",
@@ -271,6 +274,7 @@ Disable these to speed up phases in familiar domains or when conserving tokens.
 | `review.required_gates.*` | `true`, `false` | `true` | Per-stage gate enforcement for discuss/plan/execute/verify |
 | `review_granularity` | `per_task`, `per_plan` | `per_task` | Review scope used by executor tandem flow |
 | `execution_mode` | `blocking`, `optimistic` | `blocking` | Whether execution waits for review approvals |
+| `execution.executor_runtime` | `hybrid`, `task`, `codex` | `hybrid` | Executor routing (`hybrid`: codex for autonomous plans, Task for checkpointed plans) |
 | `reviewer_pool` | object/null | object | Broker reviewer auto-spawn/scaling configuration |
 
 ### Git Branching

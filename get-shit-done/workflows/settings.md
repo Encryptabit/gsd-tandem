@@ -28,6 +28,7 @@ Parse current values (default to `true` if not present):
 - `workflow.research` — spawn researcher during plan-phase
 - `workflow.plan_check` — spawn plan checker during plan-phase
 - `workflow.verifier` — spawn verifier during execute-phase
+- `execution.executor_runtime` — executor routing (`hybrid`, `task`, `codex`)
 - `review.enabled` — enforce broker review gates before progression
 - `review.fail_mode` — closed (block) vs open (warn-only)
 - `model_profile` — which model each agent uses (default: `balanced`)
@@ -86,6 +87,16 @@ AskUserQuestion([
     ]
   },
   {
+    question: "Executor runtime routing?",
+    header: "Executor",
+    multiSelect: false,
+    options: [
+      { label: "Hybrid (Recommended)", description: "Use codex exec for autonomous plans, Task gsd-executor for checkpointed plans" },
+      { label: "Task only", description: "Always use Task subagents for execution" },
+      { label: "Codex preferred", description: "Prefer codex exec; checkpointed plans still fall back to Task" }
+    ]
+  },
+  {
     question: "Require broker review gates for discuss/plan/execute/verify?",
     header: "Review",
     multiSelect: false,
@@ -120,6 +131,9 @@ Merge new settings into existing config.json:
     "plan_check": true/false,
     "verifier": true/false,
     "auto_advance": true/false
+  },
+  "execution": {
+    "executor_runtime": "hybrid" | "task" | "codex"
   },
   "review": {
     "enabled": true/false,
@@ -179,6 +193,9 @@ Write `~/.gsd/defaults.json` with:
     "verifier": <current>,
     "auto_advance": <current>
   },
+  "execution": {
+    "executor_runtime": <current>
+  },
   "review": {
     "enabled": <current>,
     "fail_mode": "closed",
@@ -209,6 +226,7 @@ Display:
 | Plan Checker         | {On/Off} |
 | Execution Verifier   | {On/Off} |
 | Auto-Advance         | {On/Off} |
+| Executor Runtime     | {Hybrid/Task Only/Codex Preferred} |
 | Review Gates         | {Fail-Closed On/Off} |
 | Git Branching        | {None/Per Phase/Per Milestone} |
 | Saved as Defaults    | {Yes/No} |
@@ -227,8 +245,8 @@ Quick commands:
 
 <success_criteria>
 - [ ] Current config read
-- [ ] User presented with 7 settings (profile + 4 workflow toggles + review + git branching)
-- [ ] Config updated with model_profile, workflow, review, and git sections
+- [ ] User presented with 8 settings (profile + 4 workflow toggles + executor runtime + review + git branching)
+- [ ] Config updated with model_profile, workflow, execution, review, and git sections
 - [ ] User offered to save as global defaults (~/.gsd/defaults.json)
 - [ ] Changes confirmed to user
 </success_criteria>
